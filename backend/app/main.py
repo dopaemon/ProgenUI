@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import create_token, hash_password, verify_password
@@ -61,6 +62,72 @@ def build_dashboard_event(database_session: Session) -> dict:
         "summary": build_dashboard_summary(database_session),
         "traffic": build_traffic_history(database_session),
     }
+
+
+def get_inbound_by_id_or_404(database_session: Session, inbound_id: int) -> Inbound:
+    inbound = database_session.query(Inbound).filter(Inbound.id == inbound_id).first()
+    if not inbound:
+        raise HTTPException(status_code=404, detail="Inbound not found")
+    return inbound
+
+
+def get_client_by_id_or_404(database_session: Session, client_id: int) -> Client:
+    client = database_session.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return client
+
+
+def ensure_inbound_name_is_unique(
+    database_session: Session,
+    inbound_name: str,
+    excluded_inbound_id: int | None = None,
+) -> None:
+    existing_inbound = database_session.query(Inbound).filter(Inbound.name == inbound_name).first()
+    if existing_inbound and existing_inbound.id != excluded_inbound_id:
+        raise HTTPException(status_code=409, detail="Inbound name already exists")
+
+
+def ensure_inbound_port_is_unique(
+    database_session: Session,
+    listen_port: int,
+    excluded_inbound_id: int | None = None,
+) -> None:
+    existing_inbound = database_session.query(Inbound).filter(Inbound.listen_port == listen_port).first()
+    if existing_inbound and existing_inbound.id != excluded_inbound_id:
+        raise HTTPException(status_code=409, detail="Inbound port already exists")
+
+
+def ensure_client_email_is_unique(
+    database_session: Session,
+    email: str,
+    excluded_client_id: int | None = None,
+) -> None:
+    existing_client = database_session.query(Client).filter(Client.email == email).first()
+    if existing_client and existing_client.id != excluded_client_id:
+        raise HTTPException(status_code=409, detail="Client email already exists")
+
+
+def ensure_client_uuid_is_unique(
+    database_session: Session,
+    client_uuid: str,
+    excluded_client_id: int | None = None,
+) -> None:
+    existing_client = database_session.query(Client).filter(Client.uuid == client_uuid).first()
+    if existing_client and existing_client.id != excluded_client_id:
+        raise HTTPException(status_code=409, detail="Client UUID already exists")
+
+
+def ensure_inbound_exists_for_client(database_session: Session, inbound_id: int) -> None:
+    get_inbound_by_id_or_404(database_session, inbound_id)
+
+
+def save_database_changes(database_session: Session) -> None:
+    try:
+        database_session.commit()
+    except IntegrityError as error:
+        database_session.rollback()
+        raise HTTPException(status_code=409, detail="Database constraint conflict") from error
 
 
 async def poll_bridge_stats_forever() -> None:
@@ -180,11 +247,14 @@ async def create_inbound(
     _: Admin = Depends(get_current_admin),
     database_session: Session = Depends(get_db),
 ) -> Inbound:
+    ensure_inbound_name_is_unique(database_session, payload.name)
+    ensure_inbound_port_is_unique(database_session, payload.listen_port)
+
     inbound = Inbound(**payload.model_dump())
     database_session.add(inbound)
-    database_session.commit()
-    database_session.refresh(inbound)
     await bridge_client.post("/inbounds/apply", {"inbound": payload.model_dump()})
+    save_database_changes(database_session)
+    database_session.refresh(inbound)
     return inbound
 
 
@@ -195,14 +265,23 @@ async def update_inbound(
     _: Admin = Depends(get_current_admin),
     database_session: Session = Depends(get_db),
 ) -> Inbound:
-    inbound = database_session.query(Inbound).filter(Inbound.id == inbound_id).first()
-    if not inbound:
-        raise HTTPException(status_code=404, detail="Inbound not found")
-    for field_name, field_value in payload.model_dump(exclude_unset=True).items():
+    inbound = get_inbound_by_id_or_404(database_session, inbound_id)
+    update_payload = payload.model_dump(exclude_unset=True)
+
+    if "name" in update_payload:
+        ensure_inbound_name_is_unique(database_session, update_payload["name"], excluded_inbound_id=inbound.id)
+    if "listen_port" in update_payload:
+        ensure_inbound_port_is_unique(
+            database_session,
+            update_payload["listen_port"],
+            excluded_inbound_id=inbound.id,
+        )
+
+    for field_name, field_value in update_payload.items():
         setattr(inbound, field_name, field_value)
-    database_session.commit()
-    database_session.refresh(inbound)
     await bridge_client.post("/inbounds/apply", {"inbound": InboundRead.model_validate(inbound).model_dump(mode="json")})
+    save_database_changes(database_session)
+    database_session.refresh(inbound)
     return inbound
 
 
@@ -212,11 +291,11 @@ def delete_inbound(
     _: Admin = Depends(get_current_admin),
     database_session: Session = Depends(get_db),
 ) -> dict:
-    inbound = database_session.query(Inbound).filter(Inbound.id == inbound_id).first()
-    if not inbound:
-        raise HTTPException(status_code=404, detail="Inbound not found")
+    inbound = get_inbound_by_id_or_404(database_session, inbound_id)
+    if inbound.clients:
+        raise HTTPException(status_code=409, detail="Cannot delete inbound with existing clients")
     database_session.delete(inbound)
-    database_session.commit()
+    save_database_changes(database_session)
     return {"status": "deleted"}
 
 
@@ -234,11 +313,16 @@ async def create_client(
     _: Admin = Depends(get_current_admin),
     database_session: Session = Depends(get_db),
 ) -> Client:
+    ensure_inbound_exists_for_client(database_session, payload.inbound_id)
+    ensure_client_email_is_unique(database_session, payload.email)
+    ensure_client_uuid_is_unique(database_session, payload.uuid)
+
     client = Client(**payload.model_dump())
     database_session.add(client)
-    database_session.commit()
-    database_session.refresh(client)
+    database_session.flush()
     await bridge_client.post("/clients/add", {"client": ClientRead.model_validate(client).model_dump(mode="json")})
+    save_database_changes(database_session)
+    database_session.refresh(client)
     return client
 
 
@@ -249,14 +333,21 @@ async def update_client(
     _: Admin = Depends(get_current_admin),
     database_session: Session = Depends(get_db),
 ) -> Client:
-    client = database_session.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-    for field_name, field_value in payload.model_dump(exclude_unset=True).items():
+    client = get_client_by_id_or_404(database_session, client_id)
+    update_payload = payload.model_dump(exclude_unset=True)
+
+    if "inbound_id" in update_payload:
+        ensure_inbound_exists_for_client(database_session, update_payload["inbound_id"])
+    if "email" in update_payload:
+        ensure_client_email_is_unique(database_session, update_payload["email"], excluded_client_id=client.id)
+    if "uuid" in update_payload:
+        ensure_client_uuid_is_unique(database_session, update_payload["uuid"], excluded_client_id=client.id)
+
+    for field_name, field_value in update_payload.items():
         setattr(client, field_name, field_value)
-    database_session.commit()
-    database_session.refresh(client)
     await bridge_client.post("/clients/update", {"client": ClientRead.model_validate(client).model_dump(mode="json")})
+    save_database_changes(database_session)
+    database_session.refresh(client)
     return client
 
 
@@ -266,13 +357,11 @@ async def delete_client(
     _: Admin = Depends(get_current_admin),
     database_session: Session = Depends(get_db),
 ) -> dict:
-    client = database_session.query(Client).filter(Client.id == client_id).first()
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    client = get_client_by_id_or_404(database_session, client_id)
     client_identifier = client.uuid
     database_session.delete(client)
-    database_session.commit()
     await bridge_client.post("/clients/remove", {"uuid": client_identifier})
+    save_database_changes(database_session)
     return {"status": "deleted"}
 
 

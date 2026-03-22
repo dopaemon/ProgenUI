@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import Grid from "@mui/material/Grid";
+import LinearProgress from "@mui/material/LinearProgress";
 import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
 import Table from "@mui/material/Table";
@@ -12,6 +13,7 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 
+import VuiAlert from "components/VuiAlert";
 import VuiBox from "components/VuiBox";
 import VuiTypography from "components/VuiTypography";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
@@ -40,13 +42,19 @@ function Tables() {
   const [inboundList, setInboundList] = useState([]);
   const [inboundForm, setInboundForm] = useState(defaultInboundForm);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function loadInbounds() {
     try {
+      setIsLoading(true);
       const inbounds = await listInbounds();
       setInboundList(inbounds);
     } catch (error) {
       setErrorMessage(error.message || "Unable to load inbounds.");
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -59,6 +67,8 @@ function Tables() {
   async function handleSubmit(event) {
     event.preventDefault();
     setErrorMessage("");
+    setSuccessMessage("");
+    setIsSubmitting(true);
 
     const inboundPayload = {
       name: inboundForm.name,
@@ -73,24 +83,31 @@ function Tables() {
     try {
       if (isEditingInbound) {
         await updateInbound(inboundForm.id, inboundPayload);
+        setSuccessMessage("Inbound updated successfully.");
       } else {
         await createInbound(inboundPayload);
+        setSuccessMessage("Inbound created successfully.");
       }
 
       setInboundForm(defaultInboundForm);
       await loadInbounds();
     } catch (error) {
       setErrorMessage(error.message || "Unable to save inbound.");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
   async function handleDelete(inboundId) {
+    setErrorMessage("");
+    setSuccessMessage("");
     try {
       await deleteInbound(inboundId);
       if (inboundForm.id === inboundId) {
         setInboundForm(defaultInboundForm);
       }
       await loadInbounds();
+      setSuccessMessage("Inbound deleted successfully.");
     } catch (error) {
       setErrorMessage(error.message || "Unable to delete inbound.");
     }
@@ -106,6 +123,17 @@ function Tables() {
               <VuiTypography variant="lg" color="white" fontWeight="bold" mb={2}>
                 {isEditingInbound ? "Edit Inbound" : "Create Inbound"}
               </VuiTypography>
+              {errorMessage ? (
+                <VuiBox mb={2}>
+                  <VuiAlert color="error">{errorMessage}</VuiAlert>
+                </VuiBox>
+              ) : null}
+              {successMessage ? (
+                <VuiBox mb={2}>
+                  <VuiAlert color="success">{successMessage}</VuiAlert>
+                </VuiBox>
+              ) : null}
+              {isLoading ? <LinearProgress sx={{ mb: 2 }} /> : null}
               <VuiBox component="form" onSubmit={handleSubmit}>
                 <Stack spacing={2}>
                   <TextField
@@ -167,16 +195,23 @@ function Tables() {
                       Enabled
                     </VuiTypography>
                   </Stack>
-                  {errorMessage ? (
-                    <VuiTypography variant="caption" color="error">
-                      {errorMessage}
-                    </VuiTypography>
-                  ) : null}
                   <Stack direction="row" spacing={2}>
-                    <Button variant="contained" type="submit">
-                      {isEditingInbound ? "Update Inbound" : "Create Inbound"}
+                    <Button variant="contained" type="submit" disabled={isSubmitting}>
+                      {isSubmitting
+                        ? "Saving..."
+                        : isEditingInbound
+                          ? "Update Inbound"
+                          : "Create Inbound"}
                     </Button>
-                    <Button variant="outlined" onClick={() => setInboundForm(defaultInboundForm)}>
+                    <Button
+                      variant="outlined"
+                      disabled={isSubmitting}
+                      onClick={() => {
+                        setInboundForm(defaultInboundForm);
+                        setErrorMessage("");
+                        setSuccessMessage("");
+                      }}
+                    >
                       Reset
                     </Button>
                   </Stack>
@@ -189,6 +224,7 @@ function Tables() {
               <VuiTypography variant="lg" color="white" fontWeight="bold" mb={2}>
                 Inbound Inventory
               </VuiTypography>
+              {isLoading ? <LinearProgress sx={{ mb: 2 }} /> : null}
               <TableContainer>
                 <Table>
                   <TableHead>
@@ -202,6 +238,11 @@ function Tables() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
+                    {!inboundList.length ? (
+                      <TableRow>
+                        <TableCell colSpan={6}>No inbounds created yet.</TableCell>
+                      </TableRow>
+                    ) : null}
                     {inboundList.map((inbound) => (
                       <TableRow key={inbound.id}>
                         <TableCell>{inbound.name}</TableCell>
@@ -217,6 +258,7 @@ function Tables() {
                             <Button
                               color="error"
                               variant="outlined"
+                              disabled={isSubmitting}
                               onClick={() => handleDelete(inbound.id)}
                             >
                               Delete
