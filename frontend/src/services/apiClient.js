@@ -142,6 +142,10 @@ function getSystemHealth() {
   return sendAuthenticatedRequest("/system/health");
 }
 
+function getSystemConfig() {
+  return sendAuthenticatedRequest("/system/config");
+}
+
 function listInbounds() {
   return sendAuthenticatedRequest("/inbounds");
 }
@@ -198,6 +202,7 @@ export {
   deleteClient,
   deleteInbound,
   getDashboardSummary,
+  getSystemConfig,
   getSystemHealth,
   getTrafficHistory,
   listClients,

@@ -145,3 +145,7 @@ class BridgeRuntimeStatus(BaseModel):
     last_error: str | None = None
     inbound_count: int = 0
     active_client_count: int = 0
+
+
+class BridgeRuntimeConfig(BaseModel):
+    config: dict

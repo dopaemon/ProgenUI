@@ -14,6 +14,7 @@ from .database import Base, SessionLocal, engine, get_db
 from .deps import get_current_admin
 from .models import Admin, Client, Inbound
 from .schemas import (
+    BridgeRuntimeConfig,
     BridgeRuntimeStatus,
     ClientCreate,
     ClientRead,
@@ -257,6 +258,12 @@ def get_traffic_history(
 async def get_system_health(_: Admin = Depends(get_current_admin)) -> BridgeRuntimeStatus:
     bridge_runtime_status = await bridge_client.get("/runtime/status")
     return BridgeRuntimeStatus(**bridge_runtime_status)
+
+
+@app.get("/api/system/config", response_model=BridgeRuntimeConfig)
+async def get_system_config(_: Admin = Depends(get_current_admin)) -> BridgeRuntimeConfig:
+    bridge_runtime_config = await bridge_client.get("/runtime/config")
+    return BridgeRuntimeConfig(**bridge_runtime_config)
 
 
 @app.get("/api/inbounds", response_model=list[InboundRead])
