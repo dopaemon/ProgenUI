@@ -138,16 +138,16 @@ function Dashboard() {
           <VuiTypography variant="h4" color="white" fontWeight="bold">
             ProgenUI Dashboard
           </VuiTypography>
-        <VuiTypography variant="button" color="text">
-          Live traffic, node health, and control plane overview.
-        </VuiTypography>
-        {errorMessage ? (
-          <VuiBox mt={2}>
-            <VuiAlert color="error">{errorMessage}</VuiAlert>
-          </VuiBox>
-        ) : null}
-        {isLoading ? <LinearProgress sx={{ mt: 2 }} /> : null}
-      </VuiBox>
+          <VuiTypography variant="button" color="text">
+            Live traffic, node health, and control plane overview.
+          </VuiTypography>
+          {errorMessage ? (
+            <VuiBox mt={2}>
+              <VuiAlert color="error">{errorMessage}</VuiAlert>
+            </VuiBox>
+          ) : null}
+          {isLoading ? <LinearProgress sx={{ mt: 2 }} /> : null}
+        </VuiBox>
         <VuiBox mb={3}>
           <Grid container spacing={3}>
             <Grid item xs={12} md={6} xl={3}>
@@ -234,6 +234,22 @@ function Dashboard() {
                     </Card>
                     <Card sx={{ p: 2 }}>
                       <VuiTypography variant="button" color="text">
+                        Runtime inbounds
+                      </VuiTypography>
+                      <VuiTypography variant="h5" color="white" fontWeight="bold">
+                        {systemHealth?.inbound_count || 0}
+                      </VuiTypography>
+                    </Card>
+                    <Card sx={{ p: 2 }}>
+                      <VuiTypography variant="button" color="text">
+                        Runtime active clients
+                      </VuiTypography>
+                      <VuiTypography variant="h5" color="white" fontWeight="bold">
+                        {systemHealth?.active_client_count || 0}
+                      </VuiTypography>
+                    </Card>
+                    <Card sx={{ p: 2 }}>
+                      <VuiTypography variant="button" color="text">
                         Binary path
                       </VuiTypography>
                       <VuiTypography variant="caption" color="white" fontWeight="regular">
@@ -250,6 +266,16 @@ function Dashboard() {
                           : "No samples yet"}
                       </VuiTypography>
                     </Card>
+                    {systemHealth?.last_error ? (
+                      <Card sx={{ p: 2 }}>
+                        <VuiTypography variant="button" color="text">
+                          Last bridge error
+                        </VuiTypography>
+                        <VuiTypography variant="caption" color="error" fontWeight="regular">
+                          {systemHealth.last_error}
+                        </VuiTypography>
+                      </Card>
+                    ) : null}
                   </Stack>
                 </VuiBox>
               </Card>

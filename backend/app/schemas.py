@@ -143,3 +143,5 @@ class BridgeRuntimeStatus(BaseModel):
     binary_path: str
     config_path: str
     last_error: str | None = None
+    inbound_count: int = 0
+    active_client_count: int = 0
