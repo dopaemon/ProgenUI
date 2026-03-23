@@ -64,6 +64,32 @@ def build_dashboard_event(database_session: Session) -> dict:
     }
 
 
+def build_bridge_inbound_payload(inbound: Inbound) -> dict:
+    return {
+        "id": inbound.id,
+        "name": inbound.name,
+        "protocol": inbound.protocol,
+        "listen_port": inbound.listen_port,
+        "transport": inbound.transport,
+        "security": inbound.security,
+        "settings_json": inbound.settings_json,
+        "enabled": inbound.enabled,
+        "clients": [
+            {
+                "id": client.id,
+                "inbound_id": client.inbound_id,
+                "email": client.email,
+                "uuid": client.uuid,
+                "traffic_limit_bytes": client.traffic_limit_bytes,
+                "used_bytes": client.used_bytes,
+                "expiry_at": client.expiry_at.isoformat() if client.expiry_at else None,
+                "enabled": client.enabled,
+            }
+            for client in inbound.clients
+        ],
+    }
+
+
 def get_inbound_by_id_or_404(database_session: Session, inbound_id: int) -> Inbound:
     inbound = database_session.query(Inbound).filter(Inbound.id == inbound_id).first()
     if not inbound:
@@ -252,9 +278,9 @@ async def create_inbound(
 
     inbound = Inbound(**payload.model_dump())
     database_session.add(inbound)
-    await bridge_client.post("/inbounds/apply", {"inbound": payload.model_dump()})
     save_database_changes(database_session)
     database_session.refresh(inbound)
+    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(inbound)})
     return inbound
 
 
@@ -279,14 +305,14 @@ async def update_inbound(
 
     for field_name, field_value in update_payload.items():
         setattr(inbound, field_name, field_value)
-    await bridge_client.post("/inbounds/apply", {"inbound": InboundRead.model_validate(inbound).model_dump(mode="json")})
     save_database_changes(database_session)
     database_session.refresh(inbound)
+    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(inbound)})
     return inbound
 
 
 @app.delete("/api/inbounds/{inbound_id}")
-def delete_inbound(
+async def delete_inbound(
     inbound_id: int,
     _: Admin = Depends(get_current_admin),
     database_session: Session = Depends(get_db),
@@ -294,8 +320,10 @@ def delete_inbound(
     inbound = get_inbound_by_id_or_404(database_session, inbound_id)
     if inbound.clients:
         raise HTTPException(status_code=409, detail="Cannot delete inbound with existing clients")
+    removed_inbound_id = inbound.id
     database_session.delete(inbound)
     save_database_changes(database_session)
+    await bridge_client.post("/inbounds/remove", {"inbound_id": removed_inbound_id})
     return {"status": "deleted"}
 
 
@@ -320,9 +348,10 @@ async def create_client(
     client = Client(**payload.model_dump())
     database_session.add(client)
     database_session.flush()
-    await bridge_client.post("/clients/add", {"client": ClientRead.model_validate(client).model_dump(mode="json")})
     save_database_changes(database_session)
     database_session.refresh(client)
+    database_session.refresh(client.inbound)
+    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(client.inbound)})
     return client
 
 
@@ -345,9 +374,10 @@ async def update_client(
 
     for field_name, field_value in update_payload.items():
         setattr(client, field_name, field_value)
-    await bridge_client.post("/clients/update", {"client": ClientRead.model_validate(client).model_dump(mode="json")})
     save_database_changes(database_session)
     database_session.refresh(client)
+    database_session.refresh(client.inbound)
+    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(client.inbound)})
     return client
 
 
@@ -359,9 +389,12 @@ async def delete_client(
 ) -> dict:
     client = get_client_by_id_or_404(database_session, client_id)
     client_identifier = client.uuid
+    inbound = client.inbound
     database_session.delete(client)
-    await bridge_client.post("/clients/remove", {"uuid": client_identifier})
     save_database_changes(database_session)
+    database_session.refresh(inbound)
+    await bridge_client.post("/clients/remove", {"uuid": client_identifier})
+    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(inbound)})
     return {"status": "deleted"}
 
 
