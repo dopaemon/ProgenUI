@@ -112,3 +112,45 @@ func TestBridgeStateRemovesClientTrafficCounterWhenClientDisappears(t *testing.T
 		t.Fatalf("expected no client stats after removal, got %d", len(secondStats))
 	}
 }
+
+func TestParseClientStatsQueryResponseMapsEmailBackToUUID(t *testing.T) {
+	bridgeState := NewBridgeState()
+	bridgeState.UpsertInbound(InboundPayload{
+		ID:         1,
+		Name:       "stats-vless",
+		Protocol:   "vless",
+		ListenPort: 8443,
+		Transport:  "tcp",
+		Security:   "none",
+		Enabled:    true,
+		Clients: []ClientPayload{
+			{
+				ID:      10,
+				Email:   "alice@example.com",
+				UUID:    "11111111-1111-1111-1111-111111111111",
+				Enabled: true,
+			},
+		},
+	})
+
+	commandOutput := []byte(`{
+		"stat": [
+			{"name": "user>>>alice@example.com>>>traffic>>>uplink", "value": "123"},
+			{"name": "user>>>alice@example.com>>>traffic>>>downlink", "value": "456"}
+		]
+	}`)
+
+	clientStats, errorValue := parseClientStatsQueryResponse(commandOutput, bridgeState, nil)
+	if errorValue != nil {
+		t.Fatalf("expected parser to succeed, got error: %v", errorValue)
+	}
+	if len(clientStats) != 1 {
+		t.Fatalf("expected one mapped client stat, got %d", len(clientStats))
+	}
+	if clientStats[0].UUID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("expected UUID to match bridge state, got %s", clientStats[0].UUID)
+	}
+	if clientStats[0].UplinkBytes != 123 || clientStats[0].DownlinkBytes != 456 {
+		t.Fatalf("expected parsed traffic values 123/456, got %d/%d", clientStats[0].UplinkBytes, clientStats[0].DownlinkBytes)
+	}
+}

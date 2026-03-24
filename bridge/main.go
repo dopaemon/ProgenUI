@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -63,6 +64,15 @@ type ClientStats struct {
 	UUID          string `json:"uuid"`
 	UplinkBytes   int64  `json:"uplink_bytes"`
 	DownlinkBytes int64  `json:"downlink_bytes"`
+}
+
+type XrayStatsQueryResponse struct {
+	Stat []XrayStatEntry `json:"stat"`
+}
+
+type XrayStatEntry struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 type BridgeState struct {
@@ -167,6 +177,21 @@ func (bridgeState *BridgeState) CountActiveClients() int {
 		}
 	}
 	return activeClientCount
+}
+
+func (bridgeState *BridgeState) FindClientByEmail(email string) (ClientPayload, bool) {
+	bridgeState.mutex.Lock()
+	defer bridgeState.mutex.Unlock()
+
+	for _, inbound := range bridgeState.inboundsByID {
+		for _, client := range inbound.Clients {
+			if client.Email == email {
+				return client, true
+			}
+		}
+	}
+
+	return ClientPayload{}, false
 }
 
 func (bridgeState *BridgeState) cleanupUnknownTrafficCounters() {
@@ -283,6 +308,22 @@ func (supervisor *XraySupervisor) Running() bool {
 	return supervisor.processCommand != nil && supervisor.processCommand.Process != nil
 }
 
+func (supervisor *XraySupervisor) ReadClientStats(requestedUUIDs []string) []ClientStats {
+	if !supervisor.Running() {
+		return supervisor.bridgeState.BuildClientStats(requestedUUIDs)
+	}
+
+	clientStats, errorValue := supervisor.queryClientStatsFromXray(requestedUUIDs)
+	if errorValue != nil {
+		supervisor.mutex.Lock()
+		supervisor.lastError = errorValue.Error()
+		supervisor.mutex.Unlock()
+		return supervisor.bridgeState.BuildClientStats(requestedUUIDs)
+	}
+
+	return clientStats
+}
+
 func (supervisor *XraySupervisor) Status() gin.H {
 	supervisor.mutex.Lock()
 	defer supervisor.mutex.Unlock()
@@ -319,6 +360,79 @@ func (supervisor *XraySupervisor) writeConfigurationFile() error {
 	}
 
 	return os.WriteFile(supervisor.configuration.XrayConfigurationPath, configurationBytes, 0o644)
+}
+
+func (supervisor *XraySupervisor) queryClientStatsFromXray(requestedUUIDs []string) ([]ClientStats, error) {
+	commandOutput, errorValue := exec.Command(
+		supervisor.configuration.XrayBinaryPath,
+		"api",
+		"statsquery",
+		"--server=127.0.0.1:"+strconv.Itoa(supervisor.configuration.XrayAPIPort),
+		"--pattern=user>>>",
+	).Output()
+	if errorValue != nil {
+		return nil, errorValue
+	}
+
+	return parseClientStatsQueryResponse(commandOutput, supervisor.bridgeState, requestedUUIDs)
+}
+
+func parseClientStatsQueryResponse(
+	commandOutput []byte,
+	bridgeState *BridgeState,
+	requestedUUIDs []string,
+) ([]ClientStats, error) {
+	var statsQueryResponse XrayStatsQueryResponse
+	if errorValue := json.Unmarshal(commandOutput, &statsQueryResponse); errorValue != nil {
+		return nil, errorValue
+	}
+
+	requestedUUIDMap := map[string]bool{}
+	for _, requestedUUID := range requestedUUIDs {
+		requestedUUIDMap[requestedUUID] = true
+	}
+
+	statsByUUID := map[string]*ClientStats{}
+	for _, statEntry := range statsQueryResponse.Stat {
+		statParts := strings.Split(statEntry.Name, ">>>")
+		if len(statParts) != 4 {
+			continue
+		}
+		if statParts[0] != "user" || statParts[2] != "traffic" {
+			continue
+		}
+
+		client, exists := bridgeState.FindClientByEmail(statParts[1])
+		if !exists {
+			continue
+		}
+		if len(requestedUUIDMap) > 0 && !requestedUUIDMap[client.UUID] {
+			continue
+		}
+
+		statValue, errorValue := strconv.ParseInt(statEntry.Value, 10, 64)
+		if errorValue != nil {
+			return nil, errorValue
+		}
+
+		if _, exists := statsByUUID[client.UUID]; !exists {
+			statsByUUID[client.UUID] = &ClientStats{UUID: client.UUID}
+		}
+
+		switch statParts[3] {
+		case "uplink":
+			statsByUUID[client.UUID].UplinkBytes = statValue
+		case "downlink":
+			statsByUUID[client.UUID].DownlinkBytes = statValue
+		}
+	}
+
+	clientStats := make([]ClientStats, 0, len(statsByUUID))
+	for _, clientStat := range statsByUUID {
+		clientStats = append(clientStats, *clientStat)
+	}
+
+	return clientStats, nil
 }
 
 func BuildXrayConfiguration(inboundList []InboundPayload, apiPort int) (map[string]any, error) {
@@ -606,7 +720,7 @@ func main() {
 	})
 	router.GET("/stats/clients", func(context *gin.Context) {
 		clientUUIDs := context.QueryArray("uuid")
-		context.JSON(http.StatusOK, gin.H{"clients": bridgeState.BuildClientStats(clientUUIDs)})
+		context.JSON(http.StatusOK, gin.H{"clients": supervisor.ReadClientStats(clientUUIDs)})
 	})
 
 	log.Fatal(router.Run(":" + configuration.Port))
