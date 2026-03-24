@@ -3,19 +3,15 @@ import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import Grid from "@mui/material/Grid";
 import LinearProgress from "@mui/material/LinearProgress";
+import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import TextField from "@mui/material/TextField";
+import { IoChevronDown } from "react-icons/io5";
 
 import VuiAlert from "components/VuiAlert";
 import VuiBox from "components/VuiBox";
+import VuiInput from "components/VuiInput";
 import VuiTypography from "components/VuiTypography";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
@@ -29,15 +25,219 @@ import {
 } from "services/apiClient";
 import { formatBytes, formatDateTime } from "utils/formatters";
 
+const bytesPerGigabyte = 1024 * 1024 * 1024;
+
+function FieldLabel({ children }) {
+  return (
+    <VuiTypography variant="caption" color="text" fontWeight="regular" mb={0.75}>
+      {children}
+    </VuiTypography>
+  );
+}
+
+function SelectField({ value, onChange, optionList, disabled = false }) {
+  const [anchorElement, setAnchorElement] = useState(null);
+  const selectedOption = optionList.find((optionItem) => optionItem.value === value);
+
+  return (
+    <>
+      <VuiBox
+        component="button"
+        type="button"
+        disabled={disabled}
+        onClick={(event) => {
+          if (!disabled) {
+            setAnchorElement(event.currentTarget);
+          }
+        }}
+        sx={{
+          width: "100%",
+          minHeight: "44px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          px: 1.75,
+          py: 1.25,
+          color: disabled ? "rgba(255,255,255,0.45)" : "#ffffff",
+          borderRadius: "16px",
+          background: "rgba(15, 21, 53, 0.92)",
+          border: "1px solid rgba(255, 255, 255, 0.18)",
+          cursor: disabled ? "default" : "pointer",
+          transition: "all 150ms ease",
+          "&:hover": disabled
+            ? {}
+            : {
+                borderColor: "rgba(255, 255, 255, 0.32)",
+                background: "rgba(15, 21, 53, 0.98)",
+              },
+          "&:disabled": {
+            opacity: 1,
+          },
+        }}
+      >
+        <VuiTypography variant="button" color={disabled ? "text" : "white"} fontWeight="regular">
+          {selectedOption?.label || "Select"}
+        </VuiTypography>
+        <IoChevronDown size="16px" color={disabled ? "rgba(255,255,255,0.45)" : "#ffffff"} />
+      </VuiBox>
+      <Menu
+        anchorEl={anchorElement}
+        open={Boolean(anchorElement)}
+        onClose={() => setAnchorElement(null)}
+        disableScrollLock
+        PaperProps={{
+          sx: {
+            mt: 1,
+            minWidth: anchorElement?.clientWidth || 220,
+            background: "#0b1437",
+            color: "#ffffff",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: "16px",
+            boxShadow: "0 20px 60px rgba(0, 0, 0, 0.35)",
+            p: 0.5,
+          },
+        }}
+      >
+        {optionList.map((optionItem) => (
+          <MenuItem
+            key={optionItem.value}
+            selected={optionItem.value === value}
+            onClick={() => {
+              onChange({ target: { value: optionItem.value } });
+              setAnchorElement(null);
+            }}
+            sx={{
+              fontSize: "14px",
+              borderRadius: "10px",
+              margin: "4px 0",
+              color: optionItem.value === value ? "#ffffff" : "#e2e8f0",
+              background: optionItem.value === value ? "rgba(0, 117, 255, 0.28)" : "transparent",
+              "&:hover": {
+                background: "rgba(0, 117, 255, 0.18)",
+              },
+            }}
+          >
+            {optionItem.label}
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
+  );
+}
+
+function ClientInventoryHeader() {
+  return (
+    <VuiBox
+      sx={{
+        display: { xs: "none", md: "grid" },
+        gridTemplateColumns: "1.1fr 0.8fr 0.8fr 0.8fr 0.9fr 1.8fr 1fr",
+        gap: 2,
+        px: 2,
+        py: 1.5,
+        borderRadius: "18px",
+        background: "rgba(255,255,255,0.05)",
+      }}
+    >
+      {["Email", "Inbound", "Used", "Limit", "Expiry", "Configuration", "Actions"].map((title) => (
+        <VuiTypography key={title} variant="caption" color="white" fontWeight="bold">
+          {title}
+        </VuiTypography>
+      ))}
+    </VuiBox>
+  );
+}
+
+function ClientInventoryRow({ client, inboundName, configurationLink, isSubmitting, onEdit, onDelete }) {
+  return (
+    <VuiBox
+      sx={{
+        mt: 1.5,
+        p: 2,
+        borderRadius: "20px",
+        background: "rgba(255,255,255,0.03)",
+        border: "1px solid rgba(255,255,255,0.08)",
+      }}
+    >
+      <VuiBox
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", md: "1.1fr 0.8fr 0.8fr 0.8fr 0.9fr 1.8fr 1fr" },
+          gap: 2,
+          alignItems: "center",
+        }}
+      >
+        {[
+          ["Email", client.email, "white", "button"],
+          ["Inbound", inboundName, "text", "caption"],
+          ["Used", formatBytes(client.used_bytes), "text", "caption"],
+          ["Limit", formatBytes(client.traffic_limit_bytes), "text", "caption"],
+          ["Expiry", formatDateTime(client.expiry_at), "text", "caption"],
+          ["Configuration", configurationLink, "text", "caption"],
+        ].map(([label, value, color, variant]) => (
+          <VuiBox key={label} sx={{ minWidth: 0 }}>
+            <VuiTypography variant="caption" color="text" display={{ xs: "block", md: "none" }}>
+              {label}
+            </VuiTypography>
+            <VuiTypography
+              variant={variant}
+              color={color}
+              fontWeight={label === "Email" ? "bold" : "regular"}
+              sx={label === "Configuration" ? { wordBreak: "break-word" } : undefined}
+            >
+              {value}
+            </VuiTypography>
+          </VuiBox>
+        ))}
+        <Stack direction="row" spacing={1} justifyContent={{ xs: "flex-start", md: "flex-end" }}>
+          <Button variant="outlined" onClick={onEdit}>
+            Edit
+          </Button>
+          <Button color="error" variant="outlined" disabled={isSubmitting} onClick={onDelete}>
+            Delete
+          </Button>
+        </Stack>
+      </VuiBox>
+    </VuiBox>
+  );
+}
+
 const defaultClientForm = {
   id: null,
   inbound_id: "",
   email: "",
-  uuid: "",
-  traffic_limit_bytes: 0,
+  uuid: generateClientIdentifier(),
+  traffic_limit_gigabytes: 0,
   expiry_at: "",
   enabled: true,
 };
+
+function generateClientIdentifier() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+
+  return `client-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function buildDefaultClientForm(firstInboundId = "") {
+  return {
+    ...defaultClientForm,
+    inbound_id: firstInboundId,
+    uuid: generateClientIdentifier(),
+  };
+}
+
+function readInboundSettings(inbound) {
+  if (!inbound?.settings_json) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(inbound.settings_json);
+  } catch {
+    return {};
+  }
+}
 
 function createConfigurationLink(client, inbound) {
   if (!inbound) {
@@ -46,6 +246,10 @@ function createConfigurationLink(client, inbound) {
 
   const hostname = window.location.hostname || "localhost";
   const protocol = inbound.protocol.toLowerCase() === "trojan" ? "trojan" : "vless";
+  const inboundSettings = readInboundSettings(inbound);
+  const websocketPath = inboundSettings.wsSettings?.path || "/";
+  const websocketHost = inboundSettings.wsSettings?.headers?.Host || "";
+  const tlsServerName = inboundSettings.tlsSettings?.serverName || "";
 
   if (protocol === "trojan") {
     return `trojan://${client.uuid}@${hostname}:${inbound.listen_port}#${encodeURIComponent(
@@ -53,7 +257,22 @@ function createConfigurationLink(client, inbound) {
     )}`;
   }
 
-  return `vless://${client.uuid}@${hostname}:${inbound.listen_port}?type=${inbound.transport}&security=${inbound.security}#${encodeURIComponent(
+  const searchParameters = new URLSearchParams({
+    type: inbound.transport,
+    security: inbound.security,
+  });
+
+  if (inbound.transport === "ws") {
+    searchParameters.set("path", websocketPath);
+  }
+  if (websocketHost) {
+    searchParameters.set("host", websocketHost);
+  }
+  if (tlsServerName) {
+    searchParameters.set("sni", tlsServerName);
+  }
+
+  return `vless://${client.uuid}@${hostname}:${inbound.listen_port}?${searchParameters.toString()}#${encodeURIComponent(
     client.email
   )}`;
 }
@@ -61,7 +280,7 @@ function createConfigurationLink(client, inbound) {
 function Billing() {
   const [clientList, setClientList] = useState([]);
   const [inboundList, setInboundList] = useState([]);
-  const [clientForm, setClientForm] = useState(defaultClientForm);
+  const [clientForm, setClientForm] = useState(buildDefaultClientForm());
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -89,6 +308,7 @@ function Billing() {
   }, []);
 
   const isEditingClient = useMemo(() => Boolean(clientForm.id), [clientForm.id]);
+  const hasAvailableInbound = inboundList.length > 0;
   const inboundNameById = useMemo(
     () => Object.fromEntries(inboundList.map((inbound) => [inbound.id, inbound.name])),
     [inboundList]
@@ -98,13 +318,19 @@ function Billing() {
     event.preventDefault();
     setErrorMessage("");
     setSuccessMessage("");
+
+    if (!hasAvailableInbound) {
+      setErrorMessage("Create an inbound before creating clients.");
+      return;
+    }
+
     setIsSubmitting(true);
 
     const clientPayload = {
       inbound_id: Number(clientForm.inbound_id),
       email: clientForm.email,
       uuid: clientForm.uuid,
-      traffic_limit_bytes: Number(clientForm.traffic_limit_bytes),
+      traffic_limit_bytes: Math.round(Number(clientForm.traffic_limit_gigabytes) * bytesPerGigabyte),
       expiry_at: clientForm.expiry_at ? new Date(clientForm.expiry_at).toISOString() : null,
       enabled: clientForm.enabled,
     };
@@ -118,10 +344,7 @@ function Billing() {
         setSuccessMessage("Client created successfully.");
       }
 
-      setClientForm({
-        ...defaultClientForm,
-        inbound_id: inboundList[0]?.id || "",
-      });
+      setClientForm(buildDefaultClientForm(inboundList[0]?.id || ""));
       await loadPageData();
     } catch (error) {
       setErrorMessage(error.message || "Unable to save client.");
@@ -136,10 +359,7 @@ function Billing() {
     try {
       await deleteClient(clientId);
       if (clientForm.id === clientId) {
-        setClientForm({
-          ...defaultClientForm,
-          inbound_id: inboundList[0]?.id || "",
-        });
+        setClientForm(buildDefaultClientForm(inboundList[0]?.id || ""));
       }
       await loadPageData();
       setSuccessMessage("Client deleted successfully.");
@@ -169,59 +389,92 @@ function Billing() {
                 </VuiBox>
               ) : null}
               {isLoading ? <LinearProgress sx={{ mb: 2 }} /> : null}
+              {!isLoading && !hasAvailableInbound ? (
+                <VuiBox mb={2}>
+                  <VuiAlert color="warning">
+                    Create at least one inbound before adding clients.
+                  </VuiAlert>
+                </VuiBox>
+              ) : null}
               <VuiBox component="form" onSubmit={handleSubmit}>
                 <Stack spacing={2}>
-                  <TextField
-                    select
-                    label="Inbound"
-                    value={clientForm.inbound_id}
-                    onChange={(event) =>
-                      setClientForm({ ...clientForm, inbound_id: event.target.value })
+                  <VuiBox>
+                    <FieldLabel>Inbound</FieldLabel>
+                    <SelectField
+                      value={clientForm.inbound_id}
+                      onChange={(event) =>
+                        setClientForm({ ...clientForm, inbound_id: event.target.value })
+                      }
+                      optionList={inboundList.map((inbound) => ({
+                        value: inbound.id,
+                        label: inbound.name,
+                      }))}
+                      disabled={!hasAvailableInbound}
+                    />
+                  </VuiBox>
+                  <VuiBox>
+                    <FieldLabel>Email</FieldLabel>
+                    <VuiInput
+                      value={clientForm.email}
+                      placeholder="user@example.com"
+                      disabled={!hasAvailableInbound}
+                      onChange={(event) =>
+                        setClientForm({ ...clientForm, email: event.target.value })
+                      }
+                    />
+                  </VuiBox>
+                  <VuiBox>
+                    <FieldLabel>UUID</FieldLabel>
+                    <VuiInput
+                      value={clientForm.uuid}
+                      disabled={!hasAvailableInbound}
+                      onChange={(event) =>
+                        setClientForm({ ...clientForm, uuid: event.target.value })
+                      }
+                    />
+                  </VuiBox>
+                  <Button
+                    variant="outlined"
+                    type="button"
+                    disabled={!hasAvailableInbound}
+                    onClick={() =>
+                      setClientForm({ ...clientForm, uuid: generateClientIdentifier() })
                     }
                   >
-                    {inboundList.map((inbound) => (
-                      <MenuItem key={inbound.id} value={inbound.id}>
-                        {inbound.name}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                  <TextField
-                    label="Email"
-                    value={clientForm.email}
-                    onChange={(event) =>
-                      setClientForm({ ...clientForm, email: event.target.value })
-                    }
-                  />
-                  <TextField
-                    label="UUID"
-                    value={clientForm.uuid}
-                    onChange={(event) =>
-                      setClientForm({ ...clientForm, uuid: event.target.value })
-                    }
-                  />
-                  <TextField
-                    label="Traffic Limit Bytes"
-                    type="number"
-                    value={clientForm.traffic_limit_bytes}
-                    onChange={(event) =>
-                      setClientForm({
-                        ...clientForm,
-                        traffic_limit_bytes: Number(event.target.value),
-                      })
-                    }
-                  />
-                  <TextField
-                    label="Expiry"
-                    type="datetime-local"
-                    InputLabelProps={{ shrink: true }}
-                    value={clientForm.expiry_at}
-                    onChange={(event) =>
-                      setClientForm({ ...clientForm, expiry_at: event.target.value })
-                    }
-                  />
+                    Generate New UUID
+                  </Button>
+                  <VuiBox>
+                    <FieldLabel>Traffic Limit (GB)</FieldLabel>
+                    <VuiInput
+                      type="number"
+                      value={clientForm.traffic_limit_gigabytes}
+                      disabled={!hasAvailableInbound}
+                      onChange={(event) =>
+                        setClientForm({
+                          ...clientForm,
+                          traffic_limit_gigabytes: Number(event.target.value),
+                        })
+                      }
+                    />
+                    <VuiTypography variant="caption" color="text" fontWeight="regular" mt={0.5}>
+                      Use 0 for unlimited traffic.
+                    </VuiTypography>
+                  </VuiBox>
+                  <VuiBox>
+                    <FieldLabel>Expiry</FieldLabel>
+                    <VuiInput
+                      type="datetime-local"
+                      value={clientForm.expiry_at}
+                      disabled={!hasAvailableInbound}
+                      onChange={(event) =>
+                        setClientForm({ ...clientForm, expiry_at: event.target.value })
+                      }
+                    />
+                  </VuiBox>
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <Switch
                       checked={clientForm.enabled}
+                      disabled={!hasAvailableInbound}
                       onChange={(event) =>
                         setClientForm({ ...clientForm, enabled: event.target.checked })
                       }
@@ -231,7 +484,11 @@ function Billing() {
                     </VuiTypography>
                   </Stack>
                   <Stack direction="row" spacing={2}>
-                    <Button variant="contained" type="submit" disabled={isSubmitting}>
+                    <Button
+                      variant="contained"
+                      type="submit"
+                      disabled={isSubmitting || !hasAvailableInbound}
+                    >
                       {isSubmitting
                         ? "Saving..."
                         : isEditingClient
@@ -240,12 +497,10 @@ function Billing() {
                     </Button>
                     <Button
                       variant="outlined"
+                      type="button"
                       disabled={isSubmitting}
                       onClick={() =>
-                        setClientForm({
-                          ...defaultClientForm,
-                          inbound_id: inboundList[0]?.id || "",
-                        })
+                        setClientForm(buildDefaultClientForm(inboundList[0]?.id || ""))
                       }
                     >
                       Reset
@@ -261,76 +516,53 @@ function Billing() {
                 Client Inventory
               </VuiTypography>
               {isLoading ? <LinearProgress sx={{ mb: 2 }} /> : null}
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Email</TableCell>
-                      <TableCell>Inbound</TableCell>
-                      <TableCell>Used</TableCell>
-                      <TableCell>Limit</TableCell>
-                      <TableCell>Expiry</TableCell>
-                      <TableCell>Configuration</TableCell>
-                      <TableCell align="right">Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {!clientList.length ? (
-                      <TableRow>
-                        <TableCell colSpan={7}>No clients created yet.</TableCell>
-                      </TableRow>
-                    ) : null}
-                    {clientList.map((client) => {
-                      const inbound = inboundList.find(
-                        (currentInbound) => currentInbound.id === client.inbound_id
-                      );
+              <ClientInventoryHeader />
+              {!clientList.length ? (
+                <VuiBox
+                  sx={{
+                    mt: 1.5,
+                    p: 3,
+                    borderRadius: "20px",
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  <VuiTypography variant="button" color="text">
+                    No clients created yet.
+                  </VuiTypography>
+                </VuiBox>
+              ) : null}
+              {clientList.map((client) => {
+                const inbound = inboundList.find(
+                  (currentInbound) => currentInbound.id === client.inbound_id
+                );
 
-                      return (
-                        <TableRow key={client.id}>
-                          <TableCell>{client.email}</TableCell>
-                          <TableCell>{inboundNameById[client.inbound_id] || client.inbound_id}</TableCell>
-                          <TableCell>{formatBytes(client.used_bytes)}</TableCell>
-                          <TableCell>{formatBytes(client.traffic_limit_bytes)}</TableCell>
-                          <TableCell>{formatDateTime(client.expiry_at)}</TableCell>
-                          <TableCell sx={{ maxWidth: 280, wordBreak: "break-word" }}>
-                            {createConfigurationLink(client, inbound)}
-                          </TableCell>
-                          <TableCell align="right">
-                            <Stack direction="row" spacing={1} justifyContent="flex-end">
-                              <Button
-                                variant="outlined"
-                                onClick={() =>
-                                  setClientForm({
-                                    id: client.id,
-                                    inbound_id: client.inbound_id,
-                                    email: client.email,
-                                    uuid: client.uuid,
-                                    traffic_limit_bytes: client.traffic_limit_bytes,
-                                    expiry_at: client.expiry_at
-                                      ? new Date(client.expiry_at).toISOString().slice(0, 16)
-                                      : "",
-                                    enabled: client.enabled,
-                                  })
-                                }
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                color="error"
-                                variant="outlined"
-                                disabled={isSubmitting}
-                                onClick={() => handleDelete(client.id)}
-                              >
-                                Delete
-                              </Button>
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                return (
+                  <ClientInventoryRow
+                    key={client.id}
+                    client={client}
+                    inboundName={inboundNameById[client.inbound_id] || client.inbound_id}
+                    configurationLink={createConfigurationLink(client, inbound)}
+                    isSubmitting={isSubmitting}
+                    onEdit={() =>
+                      setClientForm({
+                        id: client.id,
+                        inbound_id: client.inbound_id,
+                        email: client.email,
+                        uuid: client.uuid,
+                        traffic_limit_gigabytes: Number(
+                          (client.traffic_limit_bytes / bytesPerGigabyte).toFixed(2)
+                        ),
+                        expiry_at: client.expiry_at
+                          ? new Date(client.expiry_at).toISOString().slice(0, 16)
+                          : "",
+                        enabled: client.enabled,
+                      })
+                    }
+                    onDelete={() => handleDelete(client.id)}
+                  />
+                );
+              })}
             </Card>
           </Grid>
         </Grid>
