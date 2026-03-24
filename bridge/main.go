@@ -214,17 +214,21 @@ func (bridgeState *BridgeState) collectClientsByUUID() map[string]ClientPayload 
 }
 
 type XraySupervisor struct {
-	mutex          sync.Mutex
-	processCommand *exec.Cmd
-	lastError      string
-	configuration  ApplicationConfiguration
-	bridgeState    *BridgeState
+	mutex           sync.Mutex
+	processCommand  *exec.Cmd
+	lastError       string
+	lastStatsError  string
+	lastStatsSource string
+	lastStatsSyncAt string
+	configuration   ApplicationConfiguration
+	bridgeState     *BridgeState
 }
 
 func NewXraySupervisor(configuration ApplicationConfiguration, bridgeState *BridgeState) *XraySupervisor {
 	return &XraySupervisor{
-		configuration: configuration,
-		bridgeState:   bridgeState,
+		configuration:   configuration,
+		bridgeState:     bridgeState,
+		lastStatsSource: "mock",
 	}
 }
 
@@ -310,18 +314,35 @@ func (supervisor *XraySupervisor) Running() bool {
 
 func (supervisor *XraySupervisor) ReadClientStats(requestedUUIDs []string) []ClientStats {
 	if !supervisor.Running() {
-		return supervisor.bridgeState.BuildClientStats(requestedUUIDs)
+		return supervisor.recordMockStatsResult(requestedUUIDs, "xray process is not running")
 	}
 
 	clientStats, errorValue := supervisor.queryClientStatsFromXray(requestedUUIDs)
 	if errorValue != nil {
 		supervisor.mutex.Lock()
 		supervisor.lastError = errorValue.Error()
+		supervisor.lastStatsError = errorValue.Error()
+		supervisor.lastStatsSource = "mock"
+		supervisor.lastStatsSyncAt = time.Now().UTC().Format(time.RFC3339)
 		supervisor.mutex.Unlock()
 		return supervisor.bridgeState.BuildClientStats(requestedUUIDs)
 	}
 
+	supervisor.mutex.Lock()
+	supervisor.lastStatsError = ""
+	supervisor.lastStatsSource = "xray_api"
+	supervisor.lastStatsSyncAt = time.Now().UTC().Format(time.RFC3339)
+	supervisor.mutex.Unlock()
 	return clientStats
+}
+
+func (supervisor *XraySupervisor) recordMockStatsResult(requestedUUIDs []string, reason string) []ClientStats {
+	supervisor.mutex.Lock()
+	supervisor.lastStatsError = reason
+	supervisor.lastStatsSource = "mock"
+	supervisor.lastStatsSyncAt = time.Now().UTC().Format(time.RFC3339)
+	supervisor.mutex.Unlock()
+	return supervisor.bridgeState.BuildClientStats(requestedUUIDs)
 }
 
 func (supervisor *XraySupervisor) Status() gin.H {
@@ -335,6 +356,9 @@ func (supervisor *XraySupervisor) Status() gin.H {
 		"binary_path":         supervisor.configuration.XrayBinaryPath,
 		"config_path":         supervisor.configuration.XrayConfigurationPath,
 		"last_error":          supervisor.lastError,
+		"stats_source":        supervisor.lastStatsSource,
+		"last_stats_error":    supervisor.lastStatsError,
+		"last_stats_sync_at":  supervisor.lastStatsSyncAt,
 		"inbound_count":       len(inboundList),
 		"active_client_count": supervisor.bridgeState.CountActiveClients(),
 	}

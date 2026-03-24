@@ -239,6 +239,14 @@ function Dashboard() {
                     </Card>
                     <Card sx={{ p: 2 }}>
                       <VuiTypography variant="button" color="text">
+                        Stats source
+                      </VuiTypography>
+                      <VuiTypography variant="h5" color="white" fontWeight="bold">
+                        {systemHealth?.stats_source || "unknown"}
+                      </VuiTypography>
+                    </Card>
+                    <Card sx={{ p: 2 }}>
+                      <VuiTypography variant="button" color="text">
                         Runtime inbounds
                       </VuiTypography>
                       <VuiTypography variant="h5" color="white" fontWeight="bold">
@@ -271,6 +279,26 @@ function Dashboard() {
                           : "No samples yet"}
                       </VuiTypography>
                     </Card>
+                    <Card sx={{ p: 2 }}>
+                      <VuiTypography variant="button" color="text">
+                        Last stats sync
+                      </VuiTypography>
+                      <VuiTypography variant="caption" color="white" fontWeight="regular">
+                        {systemHealth?.last_stats_sync_at
+                          ? formatDateTime(systemHealth.last_stats_sync_at)
+                          : "No sync yet"}
+                      </VuiTypography>
+                    </Card>
+                    {systemHealth?.last_stats_error ? (
+                      <Card sx={{ p: 2 }}>
+                        <VuiTypography variant="button" color="text">
+                          Last stats error
+                        </VuiTypography>
+                        <VuiTypography variant="caption" color="warning" fontWeight="regular">
+                          {systemHealth.last_stats_error}
+                        </VuiTypography>
+                      </Card>
+                    ) : null}
                     {systemHealth?.last_error ? (
                       <Card sx={{ p: 2 }}>
                         <VuiTypography variant="button" color="text">
