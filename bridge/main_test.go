@@ -154,3 +154,13 @@ func TestParseClientStatsQueryResponseMapsEmailBackToUUID(t *testing.T) {
 		t.Fatalf("expected parsed traffic values 123/456, got %d/%d", clientStats[0].UplinkBytes, clientStats[0].DownlinkBytes)
 	}
 }
+
+func TestParseXrayVersionOutputReturnsFirstLine(t *testing.T) {
+	commandOutput := []byte("Xray 26.1.13 (Xray, Penetrates Everything.) Custom (go1.24.0 linux/amd64)\nA unified platform for anti-censorship.")
+
+	versionLine := parseXrayVersionOutput(commandOutput)
+
+	if versionLine != "Xray 26.1.13 (Xray, Penetrates Everything.) Custom (go1.24.0 linux/amd64)" {
+		t.Fatalf("expected first version line to be returned, got %q", versionLine)
+	}
+}

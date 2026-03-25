@@ -31,6 +31,8 @@ services:
   bridge:
     build:
       context: ./bridge
+      args:
+        XRAY_VERSION: v26.1.13
     environment:
       XRAY_BINARY: /usr/local/bin/xray
       XRAY_CONFIG_PATH: /etc/xray/config.json

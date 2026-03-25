@@ -214,22 +214,26 @@ func (bridgeState *BridgeState) collectClientsByUUID() map[string]ClientPayload 
 }
 
 type XraySupervisor struct {
-	mutex           sync.Mutex
-	processCommand  *exec.Cmd
-	lastError       string
-	lastStatsError  string
-	lastStatsSource string
-	lastStatsSyncAt string
-	configuration   ApplicationConfiguration
-	bridgeState     *BridgeState
+	mutex              sync.Mutex
+	processCommand     *exec.Cmd
+	lastError          string
+	lastStatsError     string
+	lastStatsSource    string
+	lastStatsSyncAt    string
+	xrayBinaryVersion  string
+	xrayBinaryDetected bool
+	configuration      ApplicationConfiguration
+	bridgeState        *BridgeState
 }
 
 func NewXraySupervisor(configuration ApplicationConfiguration, bridgeState *BridgeState) *XraySupervisor {
-	return &XraySupervisor{
+	supervisor := &XraySupervisor{
 		configuration:   configuration,
 		bridgeState:     bridgeState,
 		lastStatsSource: "mock",
 	}
+	supervisor.refreshBinaryMetadata()
+	return supervisor
 }
 
 func (supervisor *XraySupervisor) Start() {
@@ -240,7 +244,7 @@ func (supervisor *XraySupervisor) Start() {
 		return
 	}
 
-	if _, errorValue := os.Stat(supervisor.configuration.XrayBinaryPath); errorValue != nil {
+	if errorValue := supervisor.refreshBinaryMetadataLocked(); errorValue != nil {
 		supervisor.lastError = "xray binary not found; bridge running in stub mode"
 		return
 	}
@@ -281,13 +285,17 @@ func (supervisor *XraySupervisor) Restart() error {
 	supervisor.mutex.Lock()
 	defer supervisor.mutex.Unlock()
 
+	if errorValue := supervisor.refreshBinaryMetadataLocked(); errorValue != nil {
+		supervisor.lastError = "xray binary not found; configuration file updated in stub mode"
+	}
+
 	if errorValue := supervisor.writeConfigurationFile(); errorValue != nil {
 		supervisor.lastError = errorValue.Error()
 		return errorValue
 	}
 
 	if supervisor.processCommand == nil || supervisor.processCommand.Process == nil {
-		if _, errorValue := os.Stat(supervisor.configuration.XrayBinaryPath); errorValue != nil {
+		if !supervisor.xrayBinaryDetected {
 			supervisor.lastError = "xray binary not found; configuration file updated in stub mode"
 			return nil
 		}
@@ -350,10 +358,18 @@ func (supervisor *XraySupervisor) Status() gin.H {
 	defer supervisor.mutex.Unlock()
 
 	inboundList := supervisor.bridgeState.SnapshotInbounds()
+	runtimeMode := "stub"
+	if supervisor.xrayBinaryDetected {
+		runtimeMode = "managed"
+	}
+
 	return gin.H{
 		"xray_running":        supervisor.processCommand != nil && supervisor.processCommand.Process != nil,
 		"api_port":            supervisor.configuration.XrayAPIPort,
 		"binary_path":         supervisor.configuration.XrayBinaryPath,
+		"xray_version":        supervisor.xrayBinaryVersion,
+		"binary_detected":     supervisor.xrayBinaryDetected,
+		"runtime_mode":        runtimeMode,
 		"config_path":         supervisor.configuration.XrayConfigurationPath,
 		"last_error":          supervisor.lastError,
 		"stats_source":        supervisor.lastStatsSource,
@@ -362,6 +378,25 @@ func (supervisor *XraySupervisor) Status() gin.H {
 		"inbound_count":       len(inboundList),
 		"active_client_count": supervisor.bridgeState.CountActiveClients(),
 	}
+}
+
+func (supervisor *XraySupervisor) refreshBinaryMetadata() {
+	supervisor.mutex.Lock()
+	defer supervisor.mutex.Unlock()
+	_ = supervisor.refreshBinaryMetadataLocked()
+}
+
+func (supervisor *XraySupervisor) refreshBinaryMetadataLocked() error {
+	versionOutput, errorValue := exec.Command(supervisor.configuration.XrayBinaryPath, "version").Output()
+	if errorValue != nil {
+		supervisor.xrayBinaryVersion = ""
+		supervisor.xrayBinaryDetected = false
+		return errorValue
+	}
+
+	supervisor.xrayBinaryVersion = parseXrayVersionOutput(versionOutput)
+	supervisor.xrayBinaryDetected = true
+	return nil
 }
 
 func (supervisor *XraySupervisor) writeConfigurationFile() error {
@@ -457,6 +492,15 @@ func parseClientStatsQueryResponse(
 	}
 
 	return clientStats, nil
+}
+
+func parseXrayVersionOutput(commandOutput []byte) string {
+	versionLines := strings.Split(strings.TrimSpace(string(commandOutput)), "\n")
+	if len(versionLines) == 0 {
+		return ""
+	}
+
+	return strings.TrimSpace(versionLines[0])
 }
 
 func BuildXrayConfiguration(inboundList []InboundPayload, apiPort int) (map[string]any, error) {
