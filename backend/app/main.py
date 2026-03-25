@@ -183,9 +183,12 @@ async def lifespan(_: FastAPI):
         ensure_default_admin(database_session, settings.admin_username, hash_password(settings.admin_password))
     finally:
         database_session.close()
-    background_task = asyncio.create_task(poll_bridge_stats_forever())
+    background_task = None
+    if not settings.disable_background_poller:
+        background_task = asyncio.create_task(poll_bridge_stats_forever())
     yield
-    background_task.cancel()
+    if background_task is not None:
+        background_task.cancel()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -204,7 +207,7 @@ async def health() -> dict:
 
 
 @app.post("/api/auth/login", response_model=TokenPair)
-def login(payload: LoginRequest, database_session: Session = Depends(get_db)) -> TokenPair:
+async def login(payload: LoginRequest, database_session: Session = Depends(get_db)) -> TokenPair:
     admin = database_session.query(Admin).filter(Admin.username == payload.username).first()
     if not admin or not verify_password(payload.password, admin.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -215,7 +218,7 @@ def login(payload: LoginRequest, database_session: Session = Depends(get_db)) ->
 
 
 @app.post("/api/auth/refresh", response_model=TokenPair)
-def refresh_token(payload: RefreshRequest, database_session: Session = Depends(get_db)) -> TokenPair:
+async def refresh_token(payload: RefreshRequest, database_session: Session = Depends(get_db)) -> TokenPair:
     from .auth import decode_token
 
     try:
@@ -234,12 +237,12 @@ def refresh_token(payload: RefreshRequest, database_session: Session = Depends(g
 
 
 @app.post("/api/auth/logout")
-def logout(_: Admin = Depends(get_current_admin)) -> dict:
+async def logout(_: Admin = Depends(get_current_admin)) -> dict:
     return {"status": "ok"}
 
 
 @app.get("/api/dashboard/summary", response_model=DashboardSummary)
-def get_dashboard_summary(
+async def get_dashboard_summary(
     _: Admin = Depends(get_current_admin),
     database_session: Session = Depends(get_db),
 ) -> DashboardSummary:
@@ -247,7 +250,7 @@ def get_dashboard_summary(
 
 
 @app.get("/api/traffic/history", response_model=list[TrafficPoint])
-def get_traffic_history(
+async def get_traffic_history(
     _: Admin = Depends(get_current_admin),
     database_session: Session = Depends(get_db),
 ) -> list[TrafficPoint]:
@@ -267,7 +270,7 @@ async def get_system_config(_: Admin = Depends(get_current_admin)) -> BridgeRunt
 
 
 @app.get("/api/inbounds", response_model=list[InboundRead])
-def list_inbounds(
+async def list_inbounds(
     _: Admin = Depends(get_current_admin),
     database_session: Session = Depends(get_db),
 ) -> list[Inbound]:
@@ -335,7 +338,7 @@ async def delete_inbound(
 
 
 @app.get("/api/clients", response_model=list[ClientRead])
-def list_clients(
+async def list_clients(
     _: Admin = Depends(get_current_admin),
     database_session: Session = Depends(get_db),
 ) -> list[Client]:

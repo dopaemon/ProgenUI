@@ -141,6 +141,9 @@ class BridgeRuntimeStatus(BaseModel):
     xray_running: bool
     api_port: int
     binary_path: str
+    xray_version: str = ""
+    binary_detected: bool = False
+    runtime_mode: str = "stub"
     config_path: str
     last_error: str | None = None
     stats_source: str = "mock"

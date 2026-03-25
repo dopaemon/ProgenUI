@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     admin_username: str = Field(default="admin", alias="ADMIN_USERNAME")
     admin_password: str = Field(default="admin123", alias="ADMIN_PASSWORD")
     cors_origins: str = Field(default="http://localhost,http://localhost:3000", alias="CORS_ORIGINS")
+    disable_background_poller: bool = Field(default=False, alias="DISABLE_BACKGROUND_POLLER")
     poll_interval_seconds: int = 30
 
 

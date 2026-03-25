@@ -226,6 +226,22 @@ function Dashboard() {
                     </Card>
                     <Card sx={{ p: 2 }}>
                       <VuiTypography variant="button" color="text">
+                        Runtime mode
+                      </VuiTypography>
+                      <VuiTypography variant="h5" color="white" fontWeight="bold">
+                        {systemHealth?.runtime_mode || "unknown"}
+                      </VuiTypography>
+                    </Card>
+                    <Card sx={{ p: 2 }}>
+                      <VuiTypography variant="button" color="text">
+                        Xray binary
+                      </VuiTypography>
+                      <VuiTypography variant="h5" color="white" fontWeight="bold">
+                        {systemHealth?.binary_detected ? "Detected" : "Missing"}
+                      </VuiTypography>
+                    </Card>
+                    <Card sx={{ p: 2 }}>
+                      <VuiTypography variant="button" color="text">
                         API port
                       </VuiTypography>
                       <VuiTypography variant="h5" color="white" fontWeight="bold">
@@ -254,6 +270,14 @@ function Dashboard() {
                       </VuiTypography>
                       <VuiTypography variant="h5" color="white" fontWeight="bold">
                         {systemHealth?.active_client_count || 0}
+                      </VuiTypography>
+                    </Card>
+                    <Card sx={{ p: 2 }}>
+                      <VuiTypography variant="button" color="text">
+                        Xray version
+                      </VuiTypography>
+                      <VuiTypography variant="caption" color="white" fontWeight="regular">
+                        {systemHealth?.xray_version || "Unavailable"}
                       </VuiTypography>
                     </Card>
                     <Card sx={{ p: 2 }}>
