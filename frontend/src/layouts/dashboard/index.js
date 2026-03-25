@@ -242,6 +242,14 @@ function Dashboard() {
                     </Card>
                     <Card sx={{ p: 2 }}>
                       <VuiTypography variant="button" color="text">
+                        Xray API
+                      </VuiTypography>
+                      <VuiTypography variant="h5" color="white" fontWeight="bold">
+                        {systemHealth?.xray_api_reachable ? "Reachable" : "Unavailable"}
+                      </VuiTypography>
+                    </Card>
+                    <Card sx={{ p: 2 }}>
+                      <VuiTypography variant="button" color="text">
                         API port
                       </VuiTypography>
                       <VuiTypography variant="h5" color="white" fontWeight="bold">
@@ -296,6 +304,16 @@ function Dashboard() {
                         {trafficHistory.length
                           ? formatDateTime(trafficHistory[trafficHistory.length - 1].timestamp)
                           : "No samples yet"}
+                      </VuiTypography>
+                    </Card>
+                    <Card sx={{ p: 2 }}>
+                      <VuiTypography variant="button" color="text">
+                        Last health check
+                      </VuiTypography>
+                      <VuiTypography variant="caption" color="white" fontWeight="regular">
+                        {systemHealth?.last_health_check_at
+                          ? formatDateTime(systemHealth.last_health_check_at)
+                          : "No check yet"}
                       </VuiTypography>
                     </Card>
                     <Card sx={{ p: 2 }}>

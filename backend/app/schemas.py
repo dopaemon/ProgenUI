@@ -143,6 +143,8 @@ class BridgeRuntimeStatus(BaseModel):
     binary_path: str
     xray_version: str = ""
     binary_detected: bool = False
+    xray_api_reachable: bool = False
+    last_health_check_at: str | None = None
     runtime_mode: str = "stub"
     config_path: str
     last_error: str | None = None

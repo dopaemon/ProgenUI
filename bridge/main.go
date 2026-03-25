@@ -222,6 +222,8 @@ type XraySupervisor struct {
 	lastStatsSyncAt    string
 	xrayBinaryVersion  string
 	xrayBinaryDetected bool
+	xrayAPIReachable   bool
+	lastHealthCheckAt  string
 	configuration      ApplicationConfiguration
 	bridgeState        *BridgeState
 }
@@ -332,6 +334,8 @@ func (supervisor *XraySupervisor) ReadClientStats(requestedUUIDs []string) []Cli
 		supervisor.lastStatsError = errorValue.Error()
 		supervisor.lastStatsSource = "mock"
 		supervisor.lastStatsSyncAt = time.Now().UTC().Format(time.RFC3339)
+		supervisor.xrayAPIReachable = false
+		supervisor.lastHealthCheckAt = time.Now().UTC().Format(time.RFC3339)
 		supervisor.mutex.Unlock()
 		return supervisor.bridgeState.BuildClientStats(requestedUUIDs)
 	}
@@ -340,6 +344,8 @@ func (supervisor *XraySupervisor) ReadClientStats(requestedUUIDs []string) []Cli
 	supervisor.lastStatsError = ""
 	supervisor.lastStatsSource = "xray_api"
 	supervisor.lastStatsSyncAt = time.Now().UTC().Format(time.RFC3339)
+	supervisor.xrayAPIReachable = true
+	supervisor.lastHealthCheckAt = time.Now().UTC().Format(time.RFC3339)
 	supervisor.mutex.Unlock()
 	return clientStats
 }
@@ -349,6 +355,8 @@ func (supervisor *XraySupervisor) recordMockStatsResult(requestedUUIDs []string,
 	supervisor.lastStatsError = reason
 	supervisor.lastStatsSource = "mock"
 	supervisor.lastStatsSyncAt = time.Now().UTC().Format(time.RFC3339)
+	supervisor.xrayAPIReachable = false
+	supervisor.lastHealthCheckAt = time.Now().UTC().Format(time.RFC3339)
 	supervisor.mutex.Unlock()
 	return supervisor.bridgeState.BuildClientStats(requestedUUIDs)
 }
@@ -364,19 +372,21 @@ func (supervisor *XraySupervisor) Status() gin.H {
 	}
 
 	return gin.H{
-		"xray_running":        supervisor.processCommand != nil && supervisor.processCommand.Process != nil,
-		"api_port":            supervisor.configuration.XrayAPIPort,
-		"binary_path":         supervisor.configuration.XrayBinaryPath,
-		"xray_version":        supervisor.xrayBinaryVersion,
-		"binary_detected":     supervisor.xrayBinaryDetected,
-		"runtime_mode":        runtimeMode,
-		"config_path":         supervisor.configuration.XrayConfigurationPath,
-		"last_error":          supervisor.lastError,
-		"stats_source":        supervisor.lastStatsSource,
-		"last_stats_error":    supervisor.lastStatsError,
-		"last_stats_sync_at":  supervisor.lastStatsSyncAt,
-		"inbound_count":       len(inboundList),
-		"active_client_count": supervisor.bridgeState.CountActiveClients(),
+		"xray_running":         supervisor.processCommand != nil && supervisor.processCommand.Process != nil,
+		"api_port":             supervisor.configuration.XrayAPIPort,
+		"binary_path":          supervisor.configuration.XrayBinaryPath,
+		"xray_version":         supervisor.xrayBinaryVersion,
+		"binary_detected":      supervisor.xrayBinaryDetected,
+		"xray_api_reachable":   supervisor.xrayAPIReachable,
+		"last_health_check_at": supervisor.lastHealthCheckAt,
+		"runtime_mode":         runtimeMode,
+		"config_path":          supervisor.configuration.XrayConfigurationPath,
+		"last_error":           supervisor.lastError,
+		"stats_source":         supervisor.lastStatsSource,
+		"last_stats_error":     supervisor.lastStatsError,
+		"last_stats_sync_at":   supervisor.lastStatsSyncAt,
+		"inbound_count":        len(inboundList),
+		"active_client_count":  supervisor.bridgeState.CountActiveClients(),
 	}
 }
 

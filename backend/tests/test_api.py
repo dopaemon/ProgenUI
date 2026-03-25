@@ -30,6 +30,8 @@ class BridgeClientStub:
                 "binary_path": "/usr/local/bin/xray",
                 "xray_version": "Xray 26.1.13 (Xray, Penetrates Everything.) Custom",
                 "binary_detected": True,
+                "xray_api_reachable": True,
+                "last_health_check_at": "2026-03-31T00:00:00Z",
                 "runtime_mode": "managed",
                 "config_path": "/etc/xray/config.json",
                 "last_error": None,
@@ -253,6 +255,7 @@ def test_system_health_exposes_bridge_runtime_details(admin_user: Admin) -> None
     response = run_async(get_system_health(admin_user))
 
     assert response.binary_detected is True
+    assert response.xray_api_reachable is True
     assert response.runtime_mode == "managed"
     assert response.xray_version == "Xray 26.1.13 (Xray, Penetrates Everything.) Custom"
     assert response.stats_source == "xray_api"
