@@ -130,7 +130,7 @@ function ClientInventoryHeader() {
     <VuiBox
       sx={{
         display: { xs: "none", md: "grid" },
-        gridTemplateColumns: "1.1fr 0.8fr 0.8fr 0.8fr 0.9fr 1.8fr 1fr",
+        gridTemplateColumns: "1fr 0.8fr 1.3fr 0.9fr 1.6fr 1fr",
         gap: 2,
         px: 2,
         py: 1.5,
@@ -138,11 +138,137 @@ function ClientInventoryHeader() {
         background: "rgba(255,255,255,0.05)",
       }}
     >
-      {["Email", "Inbound", "Used", "Limit", "Expiry", "Configuration", "Actions"].map((title) => (
+      {["Email", "Inbound", "Usage", "Expiry", "Configuration", "Actions"].map((title) => (
         <VuiTypography key={title} variant="caption" color="white" fontWeight="bold">
           {title}
         </VuiTypography>
       ))}
+    </VuiBox>
+  );
+}
+
+function buildUsageSummary(client) {
+  if (!client.traffic_limit_bytes) {
+    return {
+      percentUsed: 0,
+      summaryLabel: `${formatBytes(client.used_bytes)} used of unlimited`,
+      progressLabel: "Unlimited",
+      progressColor: "#01B574",
+    };
+  }
+
+  const percentUsed = Math.min(100, (client.used_bytes / client.traffic_limit_bytes) * 100);
+  const remainingBytes = Math.max(0, client.traffic_limit_bytes - client.used_bytes);
+
+  let progressColor = "#01B574";
+  if (percentUsed >= 90) {
+    progressColor = "#FF4D4F";
+  } else if (percentUsed >= 70) {
+    progressColor = "#F6AD55";
+  }
+
+  return {
+    percentUsed,
+    summaryLabel: `${formatBytes(client.used_bytes)} / ${formatBytes(client.traffic_limit_bytes)}`,
+    progressLabel: `${formatBytes(remainingBytes)} remaining`,
+    progressColor,
+  };
+}
+
+function buildExpirySummary(expiryAt) {
+  if (!expiryAt) {
+    return {
+      statusLabel: "No expiry",
+      statusColor: "#01B574",
+      expiryLabel: "Never",
+    };
+  }
+
+  const expiryDate = new Date(expiryAt);
+  const now = new Date();
+  const remainingMilliseconds = expiryDate.getTime() - now.getTime()
+  const remainingDays = Math.ceil(remainingMilliseconds / (1000 * 60 * 60 * 24));
+
+  if (remainingMilliseconds <= 0) {
+    return {
+      statusLabel: "Expired",
+      statusColor: "#FF4D4F",
+      expiryLabel: formatDateTime(expiryAt),
+    };
+  }
+
+  if (remainingDays <= 3) {
+    return {
+      statusLabel: `${remainingDays} day${remainingDays === 1 ? "" : "s"} left`,
+      statusColor: "#F6AD55",
+      expiryLabel: formatDateTime(expiryAt),
+    };
+  }
+
+  return {
+    statusLabel: "Active",
+    statusColor: "#01B574",
+    expiryLabel: formatDateTime(expiryAt),
+  };
+}
+
+function UsageMeter({ client }) {
+  const usageSummary = buildUsageSummary(client);
+
+  return (
+    <VuiBox>
+      <VuiTypography variant="button" color="white" fontWeight="regular">
+        {usageSummary.summaryLabel}
+      </VuiTypography>
+      <VuiBox
+        sx={{
+          mt: 1,
+          height: "8px",
+          borderRadius: "999px",
+          background: "rgba(255,255,255,0.08)",
+          overflow: "hidden",
+        }}
+      >
+        <VuiBox
+          sx={{
+            width: client.traffic_limit_bytes ? `${usageSummary.percentUsed}%` : "24%",
+            height: "100%",
+            borderRadius: "999px",
+            background: usageSummary.progressColor,
+            transition: "width 180ms ease",
+          }}
+        />
+      </VuiBox>
+      <VuiTypography variant="caption" color="text" fontWeight="regular" mt={0.75}>
+        {usageSummary.progressLabel}
+      </VuiTypography>
+    </VuiBox>
+  );
+}
+
+function ExpiryBadge({ expiryAt }) {
+  const expirySummary = buildExpirySummary(expiryAt);
+
+  return (
+    <VuiBox>
+      <VuiBox
+        sx={{
+          display: "inline-flex",
+          alignItems: "center",
+          px: 1.25,
+          py: 0.5,
+          borderRadius: "999px",
+          background: `${expirySummary.statusColor}22`,
+          border: `1px solid ${expirySummary.statusColor}44`,
+        }}
+      >
+        <VuiTypography variant="caption" sx={{ color: expirySummary.statusColor, fontWeight: 700 }}>
+          {expirySummary.statusLabel}
+        </VuiTypography>
+      </VuiBox>
+      <VuiTypography variant="caption" color="text" fontWeight="regular" mt={0.75}>
+        {expirySummary.expiryLabel}
+      </VuiTypography>
     </VuiBox>
   );
 }
@@ -161,7 +287,7 @@ function ClientInventoryRow({ client, inboundName, configurationLink, isSubmitti
       <VuiBox
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", md: "1.1fr 0.8fr 0.8fr 0.8fr 0.9fr 1.8fr 1fr" },
+          gridTemplateColumns: { xs: "1fr", md: "1fr 0.8fr 1.3fr 0.9fr 1.6fr 1fr" },
           gap: 2,
           alignItems: "center",
         }}
@@ -169,23 +295,26 @@ function ClientInventoryRow({ client, inboundName, configurationLink, isSubmitti
         {[
           ["Email", client.email, "white", "button"],
           ["Inbound", inboundName, "text", "caption"],
-          ["Used", formatBytes(client.used_bytes), "text", "caption"],
-          ["Limit", formatBytes(client.traffic_limit_bytes), "text", "caption"],
-          ["Expiry", formatDateTime(client.expiry_at), "text", "caption"],
+          ["Usage", null, "text", "caption"],
+          ["Expiry", null, "text", "caption"],
           ["Configuration", configurationLink, "text", "caption"],
         ].map(([label, value, color, variant]) => (
           <VuiBox key={label} sx={{ minWidth: 0 }}>
             <VuiTypography variant="caption" color="text" display={{ xs: "block", md: "none" }}>
               {label}
             </VuiTypography>
-            <VuiTypography
-              variant={variant}
-              color={color}
-              fontWeight={label === "Email" ? "bold" : "regular"}
-              sx={label === "Configuration" ? { wordBreak: "break-word" } : undefined}
-            >
-              {value}
-            </VuiTypography>
+            {label === "Usage" ? <UsageMeter client={client} /> : null}
+            {label === "Expiry" ? <ExpiryBadge expiryAt={client.expiry_at} /> : null}
+            {label !== "Usage" && label !== "Expiry" ? (
+              <VuiTypography
+                variant={variant}
+                color={color}
+                fontWeight={label === "Email" ? "bold" : "regular"}
+                sx={label === "Configuration" ? { wordBreak: "break-word" } : undefined}
+              >
+                {value}
+              </VuiTypography>
+            ) : null}
           </VuiBox>
         ))}
         <Stack direction="row" spacing={1} justifyContent={{ xs: "flex-start", md: "flex-end" }}>
