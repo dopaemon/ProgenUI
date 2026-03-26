@@ -71,8 +71,8 @@ type XrayStatsQueryResponse struct {
 }
 
 type XrayStatEntry struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
+	Name  string          `json:"name"`
+	Value json.RawMessage `json:"value"`
 }
 
 type BridgeState struct {
@@ -272,15 +272,22 @@ func (supervisor *XraySupervisor) Start() {
 
 	supervisor.lastError = ""
 	supervisor.processCommand = processCommand
-	go func() {
-		errorValue := processCommand.Wait()
-		supervisor.mutex.Lock()
-		defer supervisor.mutex.Unlock()
-		if errorValue != nil {
-			supervisor.lastError = errorValue.Error()
-		}
+	go supervisor.waitForProcessExit(processCommand)
+}
+
+func (supervisor *XraySupervisor) waitForProcessExit(processCommand *exec.Cmd) {
+	errorValue := processCommand.Wait()
+
+	supervisor.mutex.Lock()
+	defer supervisor.mutex.Unlock()
+
+	if errorValue != nil {
+		supervisor.lastError = errorValue.Error()
+	}
+
+	if supervisor.processCommand == processCommand {
 		supervisor.processCommand = nil
-	}()
+	}
 }
 
 func (supervisor *XraySupervisor) Restart() error {
@@ -504,7 +511,7 @@ func parseClientStatsQueryResponse(
 			continue
 		}
 
-		statValue, errorValue := strconv.ParseInt(statEntry.Value, 10, 64)
+		statValue, errorValue := parseXrayStatValue(statEntry.Value)
 		if errorValue != nil {
 			return nil, errorValue
 		}
@@ -527,6 +534,20 @@ func parseClientStatsQueryResponse(
 	}
 
 	return clientStats, nil
+}
+
+func parseXrayStatValue(rawValue json.RawMessage) (int64, error) {
+	var numericValue int64
+	if errorValue := json.Unmarshal(rawValue, &numericValue); errorValue == nil {
+		return numericValue, nil
+	}
+
+	var stringValue string
+	if errorValue := json.Unmarshal(rawValue, &stringValue); errorValue == nil {
+		return strconv.ParseInt(stringValue, 10, 64)
+	}
+
+	return 0, errors.New("unsupported Xray stat value format")
 }
 
 func parseXrayVersionOutput(commandOutput []byte) string {
@@ -628,10 +649,29 @@ func buildRuntimeInbound(inbound InboundPayload) (map[string]any, error) {
 	}
 }
 
+func isClientActiveForRuntime(client ClientPayload) bool {
+	if !client.Enabled {
+		return false
+	}
+
+	if client.TrafficLimitBytes > 0 && client.UsedBytes >= client.TrafficLimitBytes {
+		return false
+	}
+
+	if client.ExpiryAt != nil && *client.ExpiryAt != "" {
+		expiryTime, errorValue := time.Parse(time.RFC3339, *client.ExpiryAt)
+		if errorValue == nil && !expiryTime.After(time.Now().UTC()) {
+			return false
+		}
+	}
+
+	return true
+}
+
 func buildVLESSInbound(inbound InboundPayload) (map[string]any, error) {
 	clientList := make([]map[string]any, 0, len(inbound.Clients))
 	for _, client := range inbound.Clients {
-		if !client.Enabled {
+		if !isClientActiveForRuntime(client) {
 			continue
 		}
 
@@ -667,7 +707,7 @@ func buildVLESSInbound(inbound InboundPayload) (map[string]any, error) {
 func buildTrojanInbound(inbound InboundPayload) (map[string]any, error) {
 	clientList := make([]map[string]any, 0, len(inbound.Clients))
 	for _, client := range inbound.Clients {
-		if !client.Enabled {
+		if !isClientActiveForRuntime(client) {
 			continue
 		}
 

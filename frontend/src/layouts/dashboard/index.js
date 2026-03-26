@@ -180,7 +180,7 @@ function Dashboard() {
                 count={systemHealth?.xray_running ? "Running" : "Stopped"}
                 percentage={{
                   color: systemHealth?.xray_running ? "success" : "error",
-                  text: "bridge",
+                  text: "xray",
                 }}
                 icon={{ color: "info", component: <IoCloudOffline size="20px" color="white" /> }}
               />

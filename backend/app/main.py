@@ -1,7 +1,9 @@
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 
+from fastapi.encoders import jsonable_encoder
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import IntegrityError
@@ -55,14 +57,33 @@ class DashboardConnectionManager:
 
 
 dashboard_connection_manager = DashboardConnectionManager()
+application_logger = logging.getLogger(__name__)
 
 
 def build_dashboard_event(database_session: Session) -> dict:
-    return {
+    dashboard_event = {
         "type": "dashboard",
         "summary": build_dashboard_summary(database_session),
         "traffic": build_traffic_history(database_session),
     }
+    return jsonable_encoder(dashboard_event)
+
+
+async def sync_all_inbounds_to_bridge(database_session: Session) -> None:
+    inbound_list = database_session.query(Inbound).order_by(Inbound.id.asc()).all()
+    for inbound in inbound_list:
+        database_session.refresh(inbound)
+        await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(inbound)})
+
+
+async def sync_inbound_runtime(database_session: Session, inbound_id: int) -> None:
+    inbound = database_session.query(Inbound).filter(Inbound.id == inbound_id).first()
+    if not inbound:
+        await bridge_client.post("/inbounds/remove", {"inbound_id": inbound_id})
+        return
+
+    database_session.refresh(inbound)
+    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(inbound)})
 
 
 def build_bridge_inbound_payload(inbound: Inbound) -> dict:
@@ -162,15 +183,18 @@ async def poll_bridge_stats_forever() -> None:
         try:
             database_session = SessionLocal()
             try:
-                client_identifiers = list(database_session.query(Client.uuid).scalars())
+                client_identifier_rows = database_session.query(Client.uuid).all()
+                client_identifiers = [client_identifier for (client_identifier,) in client_identifier_rows]
                 query_parameters = [("uuid", client_identifier) for client_identifier in client_identifiers]
                 bridge_stats = await bridge_client.get("/stats/clients", query_parameters=query_parameters)
-                persist_stats_snapshot(database_session, bridge_stats)
+                snapshot_result = persist_stats_snapshot(database_session, bridge_stats)
+                for affected_inbound_id in snapshot_result["affected_inbound_ids"]:
+                    await sync_inbound_runtime(database_session, affected_inbound_id)
                 await dashboard_connection_manager.broadcast(build_dashboard_event(database_session))
             finally:
                 database_session.close()
         except Exception:
-            pass
+            application_logger.exception("Bridge stats poller failed")
         await asyncio.sleep(settings.poll_interval_seconds)
 
 
@@ -181,6 +205,9 @@ async def lifespan(_: FastAPI):
     database_session = SessionLocal()
     try:
         ensure_default_admin(database_session, settings.admin_username, hash_password(settings.admin_password))
+        await sync_all_inbounds_to_bridge(database_session)
+    except Exception:
+        application_logger.exception("Initial bridge sync failed")
     finally:
         database_session.close()
     background_task = None

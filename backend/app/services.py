@@ -59,6 +59,7 @@ def persist_stats_snapshot(database_session: Session, bridge_stats: dict) -> dic
     sampled_at = datetime.now(timezone.utc)
     total_uplink_bytes = 0
     total_downlink_bytes = 0
+    affected_inbound_ids: set[int] = set()
 
     for client_stat in bridge_stats.get("clients", []):
         client = database_session.query(models.Client).filter(models.Client.uuid == client_stat["uuid"]).first()
@@ -67,6 +68,7 @@ def persist_stats_snapshot(database_session: Session, bridge_stats: dict) -> dic
 
         client_total_bytes = int(client_stat["uplink_bytes"]) + int(client_stat["downlink_bytes"])
         client.used_bytes = max(client.used_bytes, client_total_bytes)
+        affected_inbound_ids.add(client.inbound_id)
         database_session.add(
             models.TrafficSample(
                 client_id=client.id,
@@ -91,4 +93,5 @@ def persist_stats_snapshot(database_session: Session, bridge_stats: dict) -> dic
         "timestamp": sampled_at,
         "uplink_bytes": total_uplink_bytes,
         "downlink_bytes": total_downlink_bytes,
+        "affected_inbound_ids": sorted(affected_inbound_ids),
     }

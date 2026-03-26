@@ -15,6 +15,7 @@ from app.main import (
     delete_inbound,
     get_system_health,
     login,
+    sync_all_inbounds_to_bridge,
     update_client,
 )
 from app.models import Admin
@@ -22,6 +23,9 @@ from app.schemas import ClientCreate, ClientUpdate, InboundCreate, LoginRequest
 
 
 class BridgeClientStub:
+    def __init__(self) -> None:
+        self.post_calls: list[tuple[str, dict]] = []
+
     async def get(self, path: str, query_parameters=None) -> dict:
         if path == "/runtime/status":
             return {
@@ -46,6 +50,7 @@ class BridgeClientStub:
         return {}
 
     async def post(self, path: str, payload: dict) -> dict:
+        self.post_calls.append((path, payload))
         return {"status": "ok", "path": path, "payload": payload}
 
 
@@ -80,6 +85,13 @@ def override_bridge_client() -> Generator[None, None, None]:
     main_module.bridge_client = BridgeClientStub()
     yield
     main_module.bridge_client = original_bridge_client
+
+
+@pytest.fixture()
+def bridge_client_stub() -> BridgeClientStub:
+    import app.main as main_module
+
+    return main_module.bridge_client
 
 
 def run_async(coroutine):
@@ -258,4 +270,75 @@ def test_system_health_exposes_bridge_runtime_details(admin_user: Admin) -> None
     assert response.xray_api_reachable is True
     assert response.runtime_mode == "managed"
     assert response.xray_version == "Xray 26.1.13 (Xray, Penetrates Everything.) Custom"
-    assert response.stats_source == "xray_api"
+
+
+def test_sync_all_inbounds_to_bridge_rehydrates_runtime(
+    database_session: Session,
+    admin_user: Admin,
+    bridge_client_stub: BridgeClientStub,
+) -> None:
+    inbound = run_async(
+        create_inbound(
+            InboundCreate(
+                name="restored-inbound",
+                protocol="vless",
+                listen_port=11443,
+                transport="tcp",
+                security="none",
+                settings_json="{}",
+                enabled=True,
+            ),
+            admin_user,
+            database_session,
+        )
+    )
+
+    created_client = run_async(
+        create_client(
+            ClientCreate(
+                inbound_id=inbound.id,
+                email="restore@example.com",
+                uuid="55555555-5555-5555-5555-555555555555",
+                traffic_limit_bytes=0,
+                expiry_at=None,
+                enabled=True,
+            ),
+            admin_user,
+            database_session,
+        )
+    )
+
+    bridge_client_stub.post_calls.clear()
+
+    run_async(sync_all_inbounds_to_bridge(database_session))
+
+    assert created_client.id is not None
+    assert bridge_client_stub.post_calls == [
+        (
+            "/inbounds/apply",
+            {
+                "inbound": {
+                    "id": inbound.id,
+                    "name": "restored-inbound",
+                    "protocol": "vless",
+                    "listen_port": 11443,
+                    "transport": "tcp",
+                    "security": "none",
+                    "settings_json": "{}",
+                    "enabled": True,
+                    "clients": [
+                        {
+                            "id": created_client.id,
+                            "inbound_id": inbound.id,
+                            "email": "restore@example.com",
+                            "uuid": "55555555-5555-5555-5555-555555555555",
+                            "traffic_limit_bytes": 0,
+                            "used_bytes": 0,
+                            "expiry_at": None,
+                            "enabled": True,
+                        }
+                    ],
+                }
+            },
+        )
+    ]

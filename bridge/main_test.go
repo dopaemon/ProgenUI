@@ -61,6 +61,68 @@ func TestBuildXrayConfigurationIncludesEnabledInboundAndClients(t *testing.T) {
 	}
 }
 
+func TestBuildXrayConfigurationExcludesExpiredAndQuotaExceededClients(t *testing.T) {
+	expiredAt := "2020-01-01T00:00:00Z"
+	futureExpiryAt := "2099-01-01T00:00:00Z"
+
+	inboundList := []InboundPayload{
+		{
+			ID:         1,
+			Name:       "quota-vless",
+			Protocol:   "vless",
+			ListenPort: 8443,
+			Transport:  "tcp",
+			Security:   "none",
+			Enabled:    true,
+			Clients: []ClientPayload{
+				{
+					ID:                10,
+					InboundID:         1,
+					Email:             "active@example.com",
+					UUID:              "11111111-1111-1111-1111-111111111111",
+					TrafficLimitBytes: 1000,
+					UsedBytes:         500,
+					ExpiryAt:          &futureExpiryAt,
+					Enabled:           true,
+				},
+				{
+					ID:                11,
+					InboundID:         1,
+					Email:             "quota@example.com",
+					UUID:              "22222222-2222-2222-2222-222222222222",
+					TrafficLimitBytes: 1000,
+					UsedBytes:         1000,
+					Enabled:           true,
+				},
+				{
+					ID:        12,
+					InboundID: 1,
+					Email:     "expired@example.com",
+					UUID:      "33333333-3333-3333-3333-333333333333",
+					ExpiryAt:  &expiredAt,
+					Enabled:   true,
+				},
+			},
+		},
+	}
+
+	configuration, errorValue := BuildXrayConfiguration(inboundList, 10085)
+	if errorValue != nil {
+		t.Fatalf("expected configuration build to succeed, got error: %v", errorValue)
+	}
+
+	inbounds := configuration["inbounds"].([]map[string]any)
+	vlessInbound := inbounds[1]
+	settings := vlessInbound["settings"].(map[string]any)
+	clients := settings["clients"].([]map[string]any)
+	if len(clients) != 1 {
+		t.Fatalf("expected only one runtime-eligible client, got %d", len(clients))
+	}
+	if clients[0]["email"] != "active@example.com" {
+		t.Fatalf("expected active client to remain in config, got %v", clients[0]["email"])
+	}
+}
+
 func TestBuildXrayConfigurationRejectsInvalidSettingsJSON(t *testing.T) {
 	inboundList := []InboundPayload{
 		{
@@ -152,6 +214,45 @@ func TestParseClientStatsQueryResponseMapsEmailBackToUUID(t *testing.T) {
 	}
 	if clientStats[0].UplinkBytes != 123 || clientStats[0].DownlinkBytes != 456 {
 		t.Fatalf("expected parsed traffic values 123/456, got %d/%d", clientStats[0].UplinkBytes, clientStats[0].DownlinkBytes)
+	}
+}
+
+func TestParseClientStatsQueryResponseAcceptsNumericValues(t *testing.T) {
+	bridgeState := NewBridgeState()
+	bridgeState.UpsertInbound(InboundPayload{
+		ID:         1,
+		Name:       "numeric-stats-vless",
+		Protocol:   "vless",
+		ListenPort: 8443,
+		Transport:  "tcp",
+		Security:   "none",
+		Enabled:    true,
+		Clients: []ClientPayload{
+			{
+				ID:      10,
+				Email:   "alice@example.com",
+				UUID:    "11111111-1111-1111-1111-111111111111",
+				Enabled: true,
+			},
+		},
+	})
+
+	commandOutput := []byte(`{
+		"stat": [
+			{"name": "user>>>alice@example.com>>>traffic>>>uplink", "value": 123},
+			{"name": "user>>>alice@example.com>>>traffic>>>downlink", "value": 456}
+		]
+	}`)
+
+	clientStats, errorValue := parseClientStatsQueryResponse(commandOutput, bridgeState, nil)
+	if errorValue != nil {
+		t.Fatalf("expected parser to accept numeric values, got error: %v", errorValue)
+	}
+	if len(clientStats) != 1 {
+		t.Fatalf("expected one mapped client stat, got %d", len(clientStats))
+	}
+	if clientStats[0].UplinkBytes != 123 || clientStats[0].DownlinkBytes != 456 {
+		t.Fatalf("expected parsed numeric traffic values 123/456, got %d/%d", clientStats[0].UplinkBytes, clientStats[0].DownlinkBytes)
 	}
 }
 
