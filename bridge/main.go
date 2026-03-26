@@ -362,6 +362,8 @@ func (supervisor *XraySupervisor) recordMockStatsResult(requestedUUIDs []string,
 }
 
 func (supervisor *XraySupervisor) Status() gin.H {
+	supervisor.refreshRuntimeHealth()
+
 	supervisor.mutex.Lock()
 	defer supervisor.mutex.Unlock()
 
@@ -387,6 +389,29 @@ func (supervisor *XraySupervisor) Status() gin.H {
 		"last_stats_sync_at":   supervisor.lastStatsSyncAt,
 		"inbound_count":        len(inboundList),
 		"active_client_count":  supervisor.bridgeState.CountActiveClients(),
+	}
+}
+
+func (supervisor *XraySupervisor) refreshRuntimeHealth() {
+	supervisor.mutex.Lock()
+	defer supervisor.mutex.Unlock()
+
+	if errorValue := supervisor.refreshBinaryMetadataLocked(); errorValue != nil {
+		supervisor.lastHealthCheckAt = time.Now().UTC().Format(time.RFC3339)
+		supervisor.xrayAPIReachable = false
+		return
+	}
+
+	supervisor.lastHealthCheckAt = time.Now().UTC().Format(time.RFC3339)
+	if supervisor.processCommand == nil || supervisor.processCommand.Process == nil {
+		supervisor.xrayAPIReachable = false
+		return
+	}
+
+	_, errorValue := supervisor.queryClientStatsFromXray(nil)
+	supervisor.xrayAPIReachable = errorValue == nil
+	if errorValue != nil {
+		supervisor.lastStatsError = errorValue.Error()
 	}
 }
 
