@@ -17,7 +17,7 @@ services:
       JWT_SECRET: change-me-in-production
       JWT_ACCESS_MINUTES: 30
       JWT_REFRESH_MINUTES: 10080
-      BRIDGE_BASE_URL: http://bridge:8081
+      BRIDGE_BASE_URL: http://host.docker.internal:8081
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: admin123
       CORS_ORIGINS: http://localhost,http://localhost:3000
@@ -25,6 +25,8 @@ services:
       - backend_data:/app/data
     depends_on:
       - bridge
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - progenui
 
@@ -38,8 +40,7 @@ services:
       XRAY_CONFIG_PATH: /etc/xray/config.json
       XRAY_API_PORT: "10085"
       PORT: "8081"
-    networks:
-      - progenui
+    network_mode: host
 
   nginx:
     image: nginx:1.27-alpine
