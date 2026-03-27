@@ -38,6 +38,20 @@ class LineChart extends React.Component {
     });
   }
 
+  componentDidUpdate(prevProps) {
+    const { lineChartData, lineChartOptions } = this.props;
+
+    if (
+      prevProps.lineChartData !== lineChartData ||
+      prevProps.lineChartOptions !== lineChartOptions
+    ) {
+      this.setState({
+        chartData: lineChartData,
+        chartOptions: lineChartOptions,
+      });
+    }
+  }
+
   render() {
     return (
       <ReactApexChart

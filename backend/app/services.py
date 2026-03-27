@@ -20,9 +20,17 @@ def build_dashboard_summary(database_session: Session) -> dict:
     active_clients = (
         database_session.query(func.count(models.Client.id)).filter(models.Client.enabled.is_(True)).scalar() or 0
     )
-    total_uplink = database_session.query(func.coalesce(func.sum(models.TrafficSample.uplink_bytes), 0)).scalar() or 0
+    total_uplink = (
+        database_session.query(func.coalesce(func.sum(models.TrafficSample.uplink_bytes), 0))
+        .filter(models.TrafficSample.client_id.is_(None))
+        .scalar()
+        or 0
+    )
     total_downlink = (
-        database_session.query(func.coalesce(func.sum(models.TrafficSample.downlink_bytes), 0)).scalar() or 0
+        database_session.query(func.coalesce(func.sum(models.TrafficSample.downlink_bytes), 0))
+        .filter(models.TrafficSample.client_id.is_(None))
+        .scalar()
+        or 0
     )
     return {
         "total_inbounds": total_inbounds,
@@ -40,6 +48,7 @@ def build_traffic_history(database_session: Session, limit: int = 20) -> list[di
             func.sum(models.TrafficSample.uplink_bytes).label("uplink_bytes"),
             func.sum(models.TrafficSample.downlink_bytes).label("downlink_bytes"),
         )
+        .filter(models.TrafficSample.client_id.is_(None))
         .group_by(models.TrafficSample.sampled_at)
         .order_by(models.TrafficSample.sampled_at.desc())
         .limit(limit)
@@ -66,19 +75,31 @@ def persist_stats_snapshot(database_session: Session, bridge_stats: dict) -> dic
         if not client:
             continue
 
-        client_total_bytes = int(client_stat["uplink_bytes"]) + int(client_stat["downlink_bytes"])
-        client.used_bytes = max(client.used_bytes, client_total_bytes)
+        current_uplink_bytes = int(client_stat["uplink_bytes"])
+        current_downlink_bytes = int(client_stat["downlink_bytes"])
+        current_total_bytes = current_uplink_bytes + current_downlink_bytes
+        previous_total_bytes = int(client.used_bytes or 0)
+        delta_total_bytes = max(0, current_total_bytes - previous_total_bytes)
+
+        if delta_total_bytes == 0 or current_total_bytes == 0:
+            delta_uplink_bytes = 0
+            delta_downlink_bytes = 0
+        else:
+            delta_uplink_bytes = round(delta_total_bytes * (current_uplink_bytes / current_total_bytes))
+            delta_downlink_bytes = delta_total_bytes - delta_uplink_bytes
+
+        client.used_bytes = max(client.used_bytes, current_total_bytes)
         affected_inbound_ids.add(client.inbound_id)
         database_session.add(
             models.TrafficSample(
                 client_id=client.id,
-                uplink_bytes=int(client_stat["uplink_bytes"]),
-                downlink_bytes=int(client_stat["downlink_bytes"]),
+                uplink_bytes=delta_uplink_bytes,
+                downlink_bytes=delta_downlink_bytes,
                 sampled_at=sampled_at,
             )
         )
-        total_uplink_bytes += int(client_stat["uplink_bytes"])
-        total_downlink_bytes += int(client_stat["downlink_bytes"])
+        total_uplink_bytes += delta_uplink_bytes
+        total_downlink_bytes += delta_downlink_bytes
 
     database_session.add(
         models.TrafficSample(
