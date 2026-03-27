@@ -21,6 +21,22 @@ import {
 } from "services/apiClient";
 import { formatBytes, formatDateTime } from "utils/formatters";
 
+function buildStatsSourceSummary(statsSource, xrayApiReachable, lastStatsError) {
+  if (statsSource === "xray_api" && xrayApiReachable) {
+    return {
+      label: "Xray API",
+      color: "#01B574",
+      detail: "Using real traffic counters from Xray.",
+    };
+  }
+
+  return {
+    label: "Mock",
+    color: "#F6AD55",
+    detail: lastStatsError || "Real traffic is unavailable, so dashboard numbers are simulated.",
+  };
+}
+
 function Dashboard() {
   const [dashboardSummary, setDashboardSummary] = useState(null);
   const [trafficHistory, setTrafficHistory] = useState([]);
@@ -128,6 +144,16 @@ function Dashboard() {
       },
     }),
     [trafficHistory]
+  );
+
+  const statsSourceSummary = useMemo(
+    () =>
+      buildStatsSourceSummary(
+        systemHealth?.stats_source,
+        systemHealth?.xray_api_reachable,
+        systemHealth?.last_stats_error
+      ),
+    [systemHealth]
   );
 
   return (
@@ -260,8 +286,27 @@ function Dashboard() {
                       <VuiTypography variant="button" color="text">
                         Stats source
                       </VuiTypography>
-                      <VuiTypography variant="h5" color="white" fontWeight="bold">
-                        {systemHealth?.stats_source || "unknown"}
+                      <VuiBox
+                        sx={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          px: 1.25,
+                          py: 0.5,
+                          mt: 1,
+                          borderRadius: "999px",
+                          background: `${statsSourceSummary.color}22`,
+                          border: `1px solid ${statsSourceSummary.color}44`,
+                        }}
+                      >
+                        <VuiTypography
+                          variant="caption"
+                          sx={{ color: statsSourceSummary.color, fontWeight: 700 }}
+                        >
+                          {statsSourceSummary.label}
+                        </VuiTypography>
+                      </VuiBox>
+                      <VuiTypography variant="caption" color="text" fontWeight="regular" mt={0.75}>
+                        {statsSourceSummary.detail}
                       </VuiTypography>
                     </Card>
                     <Card sx={{ p: 2 }}>

@@ -130,7 +130,7 @@ function ClientInventoryHeader() {
     <VuiBox
       sx={{
         display: { xs: "none", md: "grid" },
-        gridTemplateColumns: "1fr 0.8fr 1.3fr 0.9fr 1.6fr 1fr",
+        gridTemplateColumns: "1fr 0.8fr 1.1fr 0.9fr 1fr 1.5fr 1fr",
         gap: 2,
         px: 2,
         py: 1.5,
@@ -138,7 +138,7 @@ function ClientInventoryHeader() {
         background: "rgba(255,255,255,0.05)",
       }}
     >
-      {["Email", "Inbound", "Usage", "Expiry", "Configuration", "Actions"].map((title) => (
+      {["Email", "Inbound", "Usage", "Expiry", "Status", "Configuration", "Actions"].map((title) => (
         <VuiTypography key={title} variant="caption" color="white" fontWeight="bold">
           {title}
         </VuiTypography>
@@ -172,6 +172,41 @@ function buildUsageSummary(client) {
     summaryLabel: `${formatBytes(client.used_bytes)} / ${formatBytes(client.traffic_limit_bytes)}`,
     progressLabel: `${formatBytes(remainingBytes)} remaining`,
     progressColor,
+  };
+}
+
+function buildClientRuntimeStatus(client) {
+  if (!client.enabled) {
+    return {
+      statusLabel: "Disabled",
+      statusColor: "#A0AEC0",
+      detailLabel: "Manually turned off",
+    };
+  }
+
+  if (client.traffic_limit_bytes > 0 && client.used_bytes >= client.traffic_limit_bytes) {
+    return {
+      statusLabel: "Quota reached",
+      statusColor: "#FF4D4F",
+      detailLabel: "Blocked until quota is increased",
+    };
+  }
+
+  if (client.expiry_at) {
+    const expiryDate = new Date(client.expiry_at);
+    if (expiryDate.getTime() <= Date.now()) {
+      return {
+        statusLabel: "Expired",
+        statusColor: "#FF4D4F",
+        detailLabel: "Blocked after expiry time",
+      };
+    }
+  }
+
+  return {
+    statusLabel: "Active",
+    statusColor: "#01B574",
+    detailLabel: "Allowed in runtime",
   };
 }
 
@@ -273,6 +308,33 @@ function ExpiryBadge({ expiryAt }) {
   );
 }
 
+function ClientStatusBadge({ client }) {
+  const runtimeStatus = buildClientRuntimeStatus(client);
+
+  return (
+    <VuiBox>
+      <VuiBox
+        sx={{
+          display: "inline-flex",
+          alignItems: "center",
+          px: 1.25,
+          py: 0.5,
+          borderRadius: "999px",
+          background: `${runtimeStatus.statusColor}22`,
+          border: `1px solid ${runtimeStatus.statusColor}44`,
+        }}
+      >
+        <VuiTypography variant="caption" sx={{ color: runtimeStatus.statusColor, fontWeight: 700 }}>
+          {runtimeStatus.statusLabel}
+        </VuiTypography>
+      </VuiBox>
+      <VuiTypography variant="caption" color="text" fontWeight="regular" mt={0.75}>
+        {runtimeStatus.detailLabel}
+      </VuiTypography>
+    </VuiBox>
+  );
+}
+
 function ClientInventoryRow({ client, inboundName, configurationLink, isSubmitting, onEdit, onDelete }) {
   return (
     <VuiBox
@@ -287,7 +349,7 @@ function ClientInventoryRow({ client, inboundName, configurationLink, isSubmitti
       <VuiBox
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", md: "1fr 0.8fr 1.3fr 0.9fr 1.6fr 1fr" },
+          gridTemplateColumns: { xs: "1fr", md: "1fr 0.8fr 1.1fr 0.9fr 1fr 1.5fr 1fr" },
           gap: 2,
           alignItems: "center",
         }}
@@ -297,6 +359,7 @@ function ClientInventoryRow({ client, inboundName, configurationLink, isSubmitti
           ["Inbound", inboundName, "text", "caption"],
           ["Usage", null, "text", "caption"],
           ["Expiry", null, "text", "caption"],
+          ["Status", null, "text", "caption"],
           ["Configuration", configurationLink, "text", "caption"],
         ].map(([label, value, color, variant]) => (
           <VuiBox key={label} sx={{ minWidth: 0 }}>
@@ -305,7 +368,8 @@ function ClientInventoryRow({ client, inboundName, configurationLink, isSubmitti
             </VuiTypography>
             {label === "Usage" ? <UsageMeter client={client} /> : null}
             {label === "Expiry" ? <ExpiryBadge expiryAt={client.expiry_at} /> : null}
-            {label !== "Usage" && label !== "Expiry" ? (
+            {label === "Status" ? <ClientStatusBadge client={client} /> : null}
+            {label !== "Usage" && label !== "Expiry" && label !== "Status" ? (
               <VuiTypography
                 variant={variant}
                 color={color}
