@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
 import Grid from "@mui/material/Grid";
 import LinearProgress from "@mui/material/LinearProgress";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
-import { IoChevronDown } from "react-icons/io5";
+import { QRCodeSVG } from "qrcode.react";
+import { IoChevronDown, IoCopyOutline, IoQrCodeOutline, IoShareSocialOutline } from "react-icons/io5";
 
 import VuiAlert from "components/VuiAlert";
 import VuiBox from "components/VuiBox";
@@ -335,7 +339,47 @@ function ClientStatusBadge({ client }) {
   );
 }
 
-function ClientInventoryRow({ client, inboundName, configurationLink, isSubmitting, onEdit, onDelete }) {
+function ConfigurationPreview({ configurationLink }) {
+  if (!configurationLink) {
+    return (
+      <VuiTypography variant="caption" color="text">
+        No configuration available
+      </VuiTypography>
+    );
+  }
+
+  return (
+    <VuiBox>
+      <VuiTypography
+        variant="caption"
+        color="white"
+        fontWeight="regular"
+        sx={{
+          display: "block",
+          maxWidth: "100%",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {configurationLink}
+      </VuiTypography>
+      <VuiTypography variant="caption" color="text" fontWeight="regular" mt={0.75}>
+        Open Share to copy or scan QR code.
+      </VuiTypography>
+    </VuiBox>
+  );
+}
+
+function ClientInventoryRow({
+  client,
+  inboundName,
+  configurationLink,
+  isSubmitting,
+  onEdit,
+  onDelete,
+  onShare,
+}) {
   return (
     <VuiBox
       sx={{
@@ -369,7 +413,10 @@ function ClientInventoryRow({ client, inboundName, configurationLink, isSubmitti
             {label === "Usage" ? <UsageMeter client={client} /> : null}
             {label === "Expiry" ? <ExpiryBadge expiryAt={client.expiry_at} /> : null}
             {label === "Status" ? <ClientStatusBadge client={client} /> : null}
-            {label !== "Usage" && label !== "Expiry" && label !== "Status" ? (
+            {label === "Configuration" ? (
+              <ConfigurationPreview configurationLink={configurationLink} />
+            ) : null}
+            {label !== "Usage" && label !== "Expiry" && label !== "Status" && label !== "Configuration" ? (
               <VuiTypography
                 variant={variant}
                 color={color}
@@ -382,6 +429,9 @@ function ClientInventoryRow({ client, inboundName, configurationLink, isSubmitti
           </VuiBox>
         ))}
         <Stack direction="row" spacing={1} justifyContent={{ xs: "flex-start", md: "flex-end" }}>
+          <Button variant="outlined" onClick={onShare} startIcon={<IoQrCodeOutline />}>
+            Share
+          </Button>
           <Button variant="outlined" onClick={onEdit}>
             Edit
           </Button>
@@ -470,6 +520,15 @@ function createConfigurationLink(client, inbound) {
   )}`;
 }
 
+function buildShareState(client, inbound) {
+  return {
+    clientId: client.id,
+    clientEmail: client.email,
+    inboundName: inbound?.name || String(client.inbound_id),
+    configurationLink: createConfigurationLink(client, inbound),
+  };
+}
+
 function Billing() {
   const [clientList, setClientList] = useState([]);
   const [inboundList, setInboundList] = useState([]);
@@ -478,6 +537,7 @@ function Billing() {
   const [successMessage, setSuccessMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [shareState, setShareState] = useState(null);
 
   async function loadPageData() {
     try {
@@ -559,6 +619,47 @@ function Billing() {
     } catch (error) {
       setErrorMessage(error.message || "Unable to delete client.");
     }
+  }
+
+  async function handleCopyConfiguration(configurationLink) {
+    if (!configurationLink) {
+      setErrorMessage("No configuration available to copy.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(configurationLink);
+      setSuccessMessage("Configuration link copied.");
+      setErrorMessage("");
+    } catch {
+      setErrorMessage("Unable to copy configuration link.");
+    }
+  }
+
+  async function handleShareConfiguration(sharePayload) {
+    if (!sharePayload?.configurationLink) {
+      setErrorMessage("No configuration available to share.");
+      return;
+    }
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `ProgenUI Access for ${sharePayload.clientEmail}`,
+          text: `Inbound: ${sharePayload.inboundName}`,
+          url: sharePayload.configurationLink,
+        });
+        setSuccessMessage("Configuration shared.");
+        setErrorMessage("");
+        return;
+      } catch (error) {
+        if (error?.name === "AbortError") {
+          return;
+        }
+      }
+    }
+
+    await handleCopyConfiguration(sharePayload.configurationLink);
   }
 
   return (
@@ -737,6 +838,7 @@ function Billing() {
                     inboundName={inboundNameById[client.inbound_id] || client.inbound_id}
                     configurationLink={createConfigurationLink(client, inbound)}
                     isSubmitting={isSubmitting}
+                    onShare={() => setShareState(buildShareState(client, inbound))}
                     onEdit={() =>
                       setClientForm({
                         id: client.id,
@@ -759,6 +861,114 @@ function Billing() {
             </Card>
           </Grid>
         </Grid>
+        <Dialog
+          open={Boolean(shareState)}
+          onClose={() => setShareState(null)}
+          fullWidth
+          maxWidth="sm"
+          PaperProps={{
+            sx: {
+              background: "#0b1437",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: "24px",
+            },
+          }}
+        >
+          <DialogContent sx={{ p: 3 }}>
+            <VuiTypography variant="h5" color="white" fontWeight="bold">
+              Share Access
+            </VuiTypography>
+            <VuiTypography variant="button" color="text" fontWeight="regular">
+              Copy the link, scan the QR code, or use the native share sheet.
+            </VuiTypography>
+            <VuiBox
+              sx={{
+                mt: 3,
+                p: 2,
+                borderRadius: "20px",
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <VuiTypography variant="caption" color="text">
+                Client
+              </VuiTypography>
+              <VuiTypography variant="button" color="white" fontWeight="bold">
+                {shareState?.clientEmail || "Unknown client"}
+              </VuiTypography>
+              <VuiTypography variant="caption" color="text" mt={1.5}>
+                Inbound
+              </VuiTypography>
+              <VuiTypography variant="button" color="white" fontWeight="regular">
+                {shareState?.inboundName || "Unknown inbound"}
+              </VuiTypography>
+            </VuiBox>
+            <VuiBox
+              sx={{
+                mt: 3,
+                display: "flex",
+                justifyContent: "center",
+              }}
+            >
+              <VuiBox
+                sx={{
+                  p: 2,
+                  borderRadius: "24px",
+                  background: "#ffffff",
+                  boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+                }}
+              >
+                {shareState?.configurationLink ? (
+                  <QRCodeSVG value={shareState.configurationLink} size={220} includeMargin />
+                ) : null}
+              </VuiBox>
+            </VuiBox>
+            <VuiBox
+              sx={{
+                mt: 3,
+                p: 2,
+                borderRadius: "20px",
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <VuiTypography variant="caption" color="text">
+                Configuration link
+              </VuiTypography>
+              <VuiTypography
+                variant="caption"
+                color="white"
+                fontWeight="regular"
+                sx={{ display: "block", mt: 1, wordBreak: "break-all" }}
+              >
+                {shareState?.configurationLink || "No configuration available"}
+              </VuiTypography>
+            </VuiBox>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 3, pt: 0 }}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} width="100%">
+              <Button
+                variant="outlined"
+                fullWidth
+                startIcon={<IoCopyOutline />}
+                onClick={() => handleCopyConfiguration(shareState?.configurationLink)}
+              >
+                Copy Link
+              </Button>
+              <Button
+                variant="outlined"
+                fullWidth
+                startIcon={<IoShareSocialOutline />}
+                onClick={() => handleShareConfiguration(shareState)}
+              >
+                Share
+              </Button>
+              <Button variant="contained" fullWidth onClick={() => setShareState(null)}>
+                Close
+              </Button>
+            </Stack>
+          </DialogActions>
+        </Dialog>
       </VuiBox>
       <Footer />
     </DashboardLayout>
