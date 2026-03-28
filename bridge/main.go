@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -224,8 +228,33 @@ type XraySupervisor struct {
 	xrayBinaryDetected bool
 	xrayAPIReachable   bool
 	lastHealthCheckAt  string
+	systemMetrics      SystemMetrics
+	previousCPUIdle    uint64
+	previousCPUTotal   uint64
+	hasPreviousCPUSnap bool
 	configuration      ApplicationConfiguration
 	bridgeState        *BridgeState
+}
+
+type SystemMetrics struct {
+	CPUCoreCount        int
+	CPUUsagePercent     float64
+	LoadAverage1m       float64
+	LoadAverage5m       float64
+	LoadAverage15m      float64
+	MemoryTotalBytes    uint64
+	MemoryAvailableBytes uint64
+	MemoryUsedBytes     uint64
+	MemoryUsedPercent   float64
+	DiskTotalBytes      uint64
+	DiskFreeBytes       uint64
+	DiskUsedBytes       uint64
+	DiskUsedPercent     float64
+	SystemUptimeSeconds float64
+	ZRAMEnabled         bool
+	ZRAMDeviceCount     int
+	ZRAMTotalBytes      uint64
+	ZRAMUsedBytes       uint64
 }
 
 func NewXraySupervisor(configuration ApplicationConfiguration, bridgeState *BridgeState) *XraySupervisor {
@@ -235,6 +264,7 @@ func NewXraySupervisor(configuration ApplicationConfiguration, bridgeState *Brid
 		lastStatsSource: "mock",
 	}
 	supervisor.refreshBinaryMetadata()
+	supervisor.refreshSystemMetrics()
 	return supervisor
 }
 
@@ -370,6 +400,7 @@ func (supervisor *XraySupervisor) recordMockStatsResult(requestedUUIDs []string,
 
 func (supervisor *XraySupervisor) Status() gin.H {
 	supervisor.refreshRuntimeHealth()
+	supervisor.refreshSystemMetrics()
 
 	supervisor.mutex.Lock()
 	defer supervisor.mutex.Unlock()
@@ -396,6 +427,24 @@ func (supervisor *XraySupervisor) Status() gin.H {
 		"last_stats_sync_at":   supervisor.lastStatsSyncAt,
 		"inbound_count":        len(inboundList),
 		"active_client_count":  supervisor.bridgeState.CountActiveClients(),
+		"cpu_core_count":       supervisor.systemMetrics.CPUCoreCount,
+		"cpu_usage_percent":    supervisor.systemMetrics.CPUUsagePercent,
+		"load_average_1m":      supervisor.systemMetrics.LoadAverage1m,
+		"load_average_5m":      supervisor.systemMetrics.LoadAverage5m,
+		"load_average_15m":     supervisor.systemMetrics.LoadAverage15m,
+		"memory_total_bytes":   supervisor.systemMetrics.MemoryTotalBytes,
+		"memory_available_bytes": supervisor.systemMetrics.MemoryAvailableBytes,
+		"memory_used_bytes":    supervisor.systemMetrics.MemoryUsedBytes,
+		"memory_used_percent":  supervisor.systemMetrics.MemoryUsedPercent,
+		"disk_total_bytes":     supervisor.systemMetrics.DiskTotalBytes,
+		"disk_free_bytes":      supervisor.systemMetrics.DiskFreeBytes,
+		"disk_used_bytes":      supervisor.systemMetrics.DiskUsedBytes,
+		"disk_used_percent":    supervisor.systemMetrics.DiskUsedPercent,
+		"system_uptime_seconds": supervisor.systemMetrics.SystemUptimeSeconds,
+		"zram_enabled":         supervisor.systemMetrics.ZRAMEnabled,
+		"zram_device_count":    supervisor.systemMetrics.ZRAMDeviceCount,
+		"zram_total_bytes":     supervisor.systemMetrics.ZRAMTotalBytes,
+		"zram_used_bytes":      supervisor.systemMetrics.ZRAMUsedBytes,
 	}
 }
 
@@ -426,6 +475,285 @@ func (supervisor *XraySupervisor) refreshBinaryMetadata() {
 	supervisor.mutex.Lock()
 	defer supervisor.mutex.Unlock()
 	_ = supervisor.refreshBinaryMetadataLocked()
+}
+
+func (supervisor *XraySupervisor) refreshSystemMetrics() {
+	cpuUsagePercent, currentIdle, currentTotal, hasCPUSnapshot := supervisor.readCPUUsagePercent()
+	loadAverage1m, loadAverage5m, loadAverage15m := readLoadAverage()
+	memoryTotalBytes, memoryAvailableBytes, memoryUsedBytes, memoryUsedPercent := readMemoryMetrics()
+	diskTotalBytes, diskFreeBytes, diskUsedBytes, diskUsedPercent := readDiskMetrics(supervisor.configuration.XrayConfigurationPath)
+	systemUptimeSeconds := readSystemUptimeSeconds()
+	zramEnabled, zramDeviceCount, zramTotalBytes, zramUsedBytes := readZRAMMetrics()
+
+	supervisor.mutex.Lock()
+	defer supervisor.mutex.Unlock()
+
+	supervisor.systemMetrics = SystemMetrics{
+		CPUCoreCount:         runtime.NumCPU(),
+		CPUUsagePercent:      cpuUsagePercent,
+		LoadAverage1m:        loadAverage1m,
+		LoadAverage5m:        loadAverage5m,
+		LoadAverage15m:       loadAverage15m,
+		MemoryTotalBytes:     memoryTotalBytes,
+		MemoryAvailableBytes: memoryAvailableBytes,
+		MemoryUsedBytes:      memoryUsedBytes,
+		MemoryUsedPercent:    memoryUsedPercent,
+		DiskTotalBytes:       diskTotalBytes,
+		DiskFreeBytes:        diskFreeBytes,
+		DiskUsedBytes:        diskUsedBytes,
+		DiskUsedPercent:      diskUsedPercent,
+		SystemUptimeSeconds:  systemUptimeSeconds,
+		ZRAMEnabled:          zramEnabled,
+		ZRAMDeviceCount:      zramDeviceCount,
+		ZRAMTotalBytes:       zramTotalBytes,
+		ZRAMUsedBytes:        zramUsedBytes,
+	}
+
+	if hasCPUSnapshot {
+		supervisor.previousCPUIdle = currentIdle
+		supervisor.previousCPUTotal = currentTotal
+		supervisor.hasPreviousCPUSnap = true
+	}
+}
+
+func (supervisor *XraySupervisor) readCPUUsagePercent() (float64, uint64, uint64, bool) {
+	currentIdle, currentTotal, errorValue := readCPUStatSnapshot()
+	if errorValue != nil {
+		return 0, 0, 0, false
+	}
+
+	supervisor.mutex.Lock()
+	previousIdle := supervisor.previousCPUIdle
+	previousTotal := supervisor.previousCPUTotal
+	hasPreviousSnapshot := supervisor.hasPreviousCPUSnap
+	supervisor.mutex.Unlock()
+
+	if !hasPreviousSnapshot || currentTotal <= previousTotal {
+		return 0, currentIdle, currentTotal, true
+	}
+
+	idleDelta := currentIdle - previousIdle
+	totalDelta := currentTotal - previousTotal
+	if totalDelta == 0 {
+		return 0, currentIdle, currentTotal, true
+	}
+
+	usagePercent := 100 * (1 - (float64(idleDelta) / float64(totalDelta)))
+	return roundToTwoDecimals(usagePercent), currentIdle, currentTotal, true
+}
+
+func readCPUStatSnapshot() (uint64, uint64, error) {
+	cpuStatLine, errorValue := readFirstLine("/proc/stat")
+	if errorValue != nil {
+		return 0, 0, errorValue
+	}
+
+	cpuFields := strings.Fields(cpuStatLine)
+	if len(cpuFields) < 8 || cpuFields[0] != "cpu" {
+		return 0, 0, errors.New("invalid /proc/stat cpu line")
+	}
+
+	var total uint64
+	values := make([]uint64, 0, len(cpuFields)-1)
+	for _, cpuField := range cpuFields[1:] {
+		parsedValue, parseError := strconv.ParseUint(cpuField, 10, 64)
+		if parseError != nil {
+			return 0, 0, parseError
+		}
+		values = append(values, parsedValue)
+		total += parsedValue
+	}
+
+	idle := values[3]
+	if len(values) > 4 {
+		idle += values[4]
+	}
+
+	return idle, total, nil
+}
+
+func readLoadAverage() (float64, float64, float64) {
+	loadAverageLine, errorValue := readFirstLine("/proc/loadavg")
+	if errorValue != nil {
+		return 0, 0, 0
+	}
+
+	loadAverageFields := strings.Fields(loadAverageLine)
+	if len(loadAverageFields) < 3 {
+		return 0, 0, 0
+	}
+
+	loadAverage1m, _ := strconv.ParseFloat(loadAverageFields[0], 64)
+	loadAverage5m, _ := strconv.ParseFloat(loadAverageFields[1], 64)
+	loadAverage15m, _ := strconv.ParseFloat(loadAverageFields[2], 64)
+	return roundToTwoDecimals(loadAverage1m), roundToTwoDecimals(loadAverage5m), roundToTwoDecimals(loadAverage15m)
+}
+
+func readMemoryMetrics() (uint64, uint64, uint64, float64) {
+	memInfoMap, errorValue := readMemInfo()
+	if errorValue != nil {
+		return 0, 0, 0, 0
+	}
+
+	totalBytes := memInfoMap["MemTotal"] * 1024
+	availableBytes := memInfoMap["MemAvailable"] * 1024
+	if availableBytes == 0 {
+		availableBytes = memInfoMap["MemFree"] * 1024
+	}
+	usedBytes := uint64(0)
+	usedPercent := 0.0
+	if totalBytes >= availableBytes {
+		usedBytes = totalBytes - availableBytes
+	}
+	if totalBytes > 0 {
+		usedPercent = roundToTwoDecimals((float64(usedBytes) / float64(totalBytes)) * 100)
+	}
+
+	return totalBytes, availableBytes, usedBytes, usedPercent
+}
+
+func readMemInfo() (map[string]uint64, error) {
+	memInfoFile, errorValue := os.Open("/proc/meminfo")
+	if errorValue != nil {
+		return nil, errorValue
+	}
+	defer memInfoFile.Close()
+
+	memInfoMap := map[string]uint64{}
+	scanner := bufio.NewScanner(memInfoFile)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		fields := strings.Fields(strings.TrimSpace(parts[1]))
+		if len(fields) == 0 {
+			continue
+		}
+
+		parsedValue, parseError := strconv.ParseUint(fields[0], 10, 64)
+		if parseError != nil {
+			continue
+		}
+
+		memInfoMap[parts[0]] = parsedValue
+	}
+
+	return memInfoMap, scanner.Err()
+}
+
+func readDiskMetrics(referencePath string) (uint64, uint64, uint64, float64) {
+	var fileSystemStat syscall.Statfs_t
+	pathToCheck := filepath.Dir(referencePath)
+	if pathToCheck == "." || pathToCheck == "" {
+		pathToCheck = "/"
+	}
+
+	if errorValue := syscall.Statfs(pathToCheck, &fileSystemStat); errorValue != nil {
+		if errorValue = syscall.Statfs("/", &fileSystemStat); errorValue != nil {
+			return 0, 0, 0, 0
+		}
+	}
+
+	totalBytes := fileSystemStat.Blocks * uint64(fileSystemStat.Bsize)
+	freeBytes := fileSystemStat.Bavail * uint64(fileSystemStat.Bsize)
+	usedBytes := totalBytes - freeBytes
+	usedPercent := 0.0
+	if totalBytes > 0 {
+		usedPercent = roundToTwoDecimals((float64(usedBytes) / float64(totalBytes)) * 100)
+	}
+
+	return totalBytes, freeBytes, usedBytes, usedPercent
+}
+
+func readSystemUptimeSeconds() float64 {
+	uptimeLine, errorValue := readFirstLine("/proc/uptime")
+	if errorValue != nil {
+		return 0
+	}
+
+	uptimeFields := strings.Fields(uptimeLine)
+	if len(uptimeFields) == 0 {
+		return 0
+	}
+
+	uptimeSeconds, parseError := strconv.ParseFloat(uptimeFields[0], 64)
+	if parseError != nil {
+		return 0
+	}
+
+	return roundToTwoDecimals(uptimeSeconds)
+}
+
+func readZRAMMetrics() (bool, int, uint64, uint64) {
+	zramDevicePaths, errorValue := filepath.Glob("/sys/block/zram*")
+	if errorValue != nil || len(zramDevicePaths) == 0 {
+		return false, 0, 0, 0
+	}
+
+	totalBytes := uint64(0)
+	usedBytes := uint64(0)
+	deviceCount := 0
+
+	for _, zramDevicePath := range zramDevicePaths {
+		deviceCount += 1
+		totalBytes += readUintFromFile(filepath.Join(zramDevicePath, "disksize"))
+
+		memoryUsedTotal := readUintFromFile(filepath.Join(zramDevicePath, "mem_used_total"))
+		if memoryUsedTotal > 0 {
+			usedBytes += memoryUsedTotal
+			continue
+		}
+
+		mmStatLine, readError := readFirstLine(filepath.Join(zramDevicePath, "mm_stat"))
+		if readError != nil {
+			continue
+		}
+
+		mmStatFields := strings.Fields(mmStatLine)
+		if len(mmStatFields) >= 3 {
+			parsedUsedBytes, parseError := strconv.ParseUint(mmStatFields[2], 10, 64)
+			if parseError == nil {
+				usedBytes += parsedUsedBytes
+			}
+		}
+	}
+
+	return deviceCount > 0, deviceCount, totalBytes, usedBytes
+}
+
+func readUintFromFile(path string) uint64 {
+	fileContents, errorValue := os.ReadFile(path)
+	if errorValue != nil {
+		return 0
+	}
+
+	parsedValue, parseError := strconv.ParseUint(strings.TrimSpace(string(fileContents)), 10, 64)
+	if parseError != nil {
+		return 0
+	}
+
+	return parsedValue
+}
+
+func readFirstLine(path string) (string, error) {
+	fileContents, errorValue := os.ReadFile(path)
+	if errorValue != nil {
+		return "", errorValue
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(fileContents)), "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return "", fmt.Errorf("file %s is empty", path)
+	}
+
+	return lines[0], nil
+}
+
+func roundToTwoDecimals(value float64) float64 {
+	return math.Round(value*100) / 100
 }
 
 func (supervisor *XraySupervisor) refreshBinaryMetadataLocked() error {

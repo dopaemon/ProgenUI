@@ -23,4 +23,29 @@ function formatDateTime(dateValue) {
   return new Date(dateValue).toLocaleString();
 }
 
-export { formatBytes, formatDateTime };
+function formatPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "0%";
+  }
+
+  return `${Number(value).toFixed(1)}%`;
+}
+
+function formatDuration(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const dayCount = Math.floor(safeSeconds / 86400);
+  const hourCount = Math.floor((safeSeconds % 86400) / 3600);
+  const minuteCount = Math.floor((safeSeconds % 3600) / 60);
+
+  const parts = [];
+  if (dayCount > 0) {
+    parts.push(`${dayCount}d`);
+  }
+  if (hourCount > 0 || parts.length > 0) {
+    parts.push(`${hourCount}h`);
+  }
+  parts.push(`${minuteCount}m`);
+  return parts.join(" ");
+}
+
+export { formatBytes, formatDateTime, formatDuration, formatPercent };

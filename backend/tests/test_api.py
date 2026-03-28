@@ -44,6 +44,24 @@ class BridgeClientStub:
                 "last_stats_sync_at": "2026-03-31T00:00:00Z",
                 "inbound_count": 2,
                 "active_client_count": 3,
+                "cpu_core_count": 8,
+                "cpu_usage_percent": 21.5,
+                "load_average_1m": 0.35,
+                "load_average_5m": 0.41,
+                "load_average_15m": 0.52,
+                "memory_total_bytes": 17179869184,
+                "memory_available_bytes": 8589934592,
+                "memory_used_bytes": 8589934592,
+                "memory_used_percent": 50.0,
+                "disk_total_bytes": 536870912000,
+                "disk_free_bytes": 268435456000,
+                "disk_used_bytes": 268435456000,
+                "disk_used_percent": 50.0,
+                "system_uptime_seconds": 86400.0,
+                "zram_enabled": True,
+                "zram_device_count": 1,
+                "zram_total_bytes": 4294967296,
+                "zram_used_bytes": 1073741824,
             }
         if path == "/stats/clients":
             return {"clients": []}
@@ -270,6 +288,9 @@ def test_system_health_exposes_bridge_runtime_details(admin_user: Admin) -> None
     assert response.xray_api_reachable is True
     assert response.runtime_mode == "managed"
     assert response.xray_version == "Xray 26.1.13 (Xray, Penetrates Everything.) Custom"
+    assert response.cpu_core_count == 8
+    assert response.memory_used_percent == 50.0
+    assert response.zram_enabled is True
 
 
 def test_sync_all_inbounds_to_bridge_rehydrates_runtime(

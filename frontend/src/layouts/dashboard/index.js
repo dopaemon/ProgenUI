@@ -19,7 +19,7 @@ import {
   getSystemHealth,
   getTrafficHistory,
 } from "services/apiClient";
-import { formatBytes, formatDateTime } from "utils/formatters";
+import { formatBytes, formatDateTime, formatDuration, formatPercent } from "utils/formatters";
 
 function buildStatsSourceSummary(statsSource, xrayApiReachable, lastStatsError) {
   if (statsSource === "xray_api" && xrayApiReachable) {
@@ -47,7 +47,7 @@ function Dashboard() {
   useEffect(() => {
     let isMounted = true;
 
-    async function loadDashboard() {
+    async function loadDashboardData() {
       try {
         const [summaryResponse, historyResponse, healthResponse] = await Promise.all([
           getDashboardSummary(),
@@ -62,6 +62,7 @@ function Dashboard() {
         setDashboardSummary(summaryResponse);
         setTrafficHistory(historyResponse);
         setSystemHealth(healthResponse);
+        setErrorMessage("");
       } catch (error) {
         if (isMounted) {
           setErrorMessage(error.message || "Unable to load dashboard.");
@@ -73,7 +74,10 @@ function Dashboard() {
       }
     }
 
-    loadDashboard();
+    loadDashboardData();
+    const refreshInterval = window.setInterval(() => {
+      loadDashboardData();
+    }, 30000);
 
     const websocketProtocol = window.location.protocol === "https:" ? "wss" : "ws";
     const websocketConnection = new WebSocket(
@@ -90,10 +94,12 @@ function Dashboard() {
 
     return () => {
       isMounted = false;
+      window.clearInterval(refreshInterval);
       websocketConnection.close();
     };
   }, []);
 
+  const hasTrafficSamples = trafficHistory.length > 0;
   const lineChartSeries = useMemo(
     () => [
       {
@@ -120,6 +126,7 @@ function Dashboard() {
           new Date(point.timestamp).toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
+            second: "2-digit",
           })
         ),
         labels: { style: { colors: "#A0AEC0" } },
@@ -142,6 +149,14 @@ function Dashboard() {
       grid: {
         borderColor: "#2D3748",
       },
+      noData: {
+        text: "No traffic samples yet",
+        align: "center",
+        verticalAlign: "middle",
+        style: {
+          color: "#A0AEC0",
+        },
+      },
     }),
     [trafficHistory]
   );
@@ -153,6 +168,52 @@ function Dashboard() {
         systemHealth?.xray_api_reachable,
         systemHealth?.last_stats_error
       ),
+    [systemHealth]
+  );
+
+  const systemMetricCardList = useMemo(
+    () => [
+      {
+        title: "CPU usage",
+        value: formatPercent(systemHealth?.cpu_usage_percent),
+        detail: `${systemHealth?.cpu_core_count || 0} cores`,
+      },
+      {
+        title: "Memory",
+        value: `${formatBytes(systemHealth?.memory_used_bytes || 0)} / ${formatBytes(
+          systemHealth?.memory_total_bytes || 0
+        )}`,
+        detail: formatPercent(systemHealth?.memory_used_percent),
+      },
+      {
+        title: "Disk",
+        value: `${formatBytes(systemHealth?.disk_used_bytes || 0)} / ${formatBytes(
+          systemHealth?.disk_total_bytes || 0
+        )}`,
+        detail: formatPercent(systemHealth?.disk_used_percent),
+      },
+      {
+        title: "System load",
+        value: `${systemHealth?.load_average_1m ?? 0} / ${systemHealth?.load_average_5m ?? 0}`,
+        detail: `15m ${systemHealth?.load_average_15m ?? 0}`,
+      },
+      {
+        title: "Uptime",
+        value: formatDuration(systemHealth?.system_uptime_seconds || 0),
+        detail: "Host runtime",
+      },
+      {
+        title: "ZRAM",
+        value: systemHealth?.zram_enabled
+          ? `${formatBytes(systemHealth?.zram_used_bytes || 0)} / ${formatBytes(
+              systemHealth?.zram_total_bytes || 0
+            )}`
+          : "Unavailable",
+        detail: systemHealth?.zram_enabled
+          ? `${systemHealth?.zram_device_count || 0} device(s)`
+          : "Not enabled on this host",
+      },
+    ],
     [systemHealth]
   );
 
@@ -215,6 +276,27 @@ function Dashboard() {
         </VuiBox>
         <VuiBox mb={3}>
           <Grid container spacing={3}>
+            {systemMetricCardList.map((metricCard) => (
+              <Grid key={metricCard.title} item xs={12} md={6} xl={4}>
+                <Card>
+                  <VuiBox p={3}>
+                    <VuiTypography variant="button" color="text">
+                      {metricCard.title}
+                    </VuiTypography>
+                    <VuiTypography variant="h5" color="white" fontWeight="bold" mt={0.5}>
+                      {metricCard.value}
+                    </VuiTypography>
+                    <VuiTypography variant="caption" color="text" fontWeight="regular" mt={0.75}>
+                      {metricCard.detail}
+                    </VuiTypography>
+                  </VuiBox>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        </VuiBox>
+        <VuiBox mb={3}>
+          <Grid container spacing={3}>
             <Grid item xs={12} xl={8}>
               <Card>
                 <VuiBox p={3} sx={{ height: "100%" }}>
@@ -226,6 +308,11 @@ function Dashboard() {
                       Polled from bridge stats and streamed by WebSocket.
                     </VuiTypography>
                   </VuiBox>
+                  {!hasTrafficSamples ? (
+                    <VuiBox mb={2}>
+                      <VuiAlert color="info">No traffic samples have been recorded yet.</VuiAlert>
+                    </VuiBox>
+                  ) : null}
                   <VuiBox sx={{ height: "310px" }}>
                     <LineChart
                       lineChartData={lineChartSeries}

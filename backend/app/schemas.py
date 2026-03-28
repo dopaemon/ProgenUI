@@ -153,6 +153,24 @@ class BridgeRuntimeStatus(BaseModel):
     last_stats_sync_at: str | None = None
     inbound_count: int = 0
     active_client_count: int = 0
+    cpu_core_count: int = 0
+    cpu_usage_percent: float = 0
+    load_average_1m: float = 0
+    load_average_5m: float = 0
+    load_average_15m: float = 0
+    memory_total_bytes: int = 0
+    memory_available_bytes: int = 0
+    memory_used_bytes: int = 0
+    memory_used_percent: float = 0
+    disk_total_bytes: int = 0
+    disk_free_bytes: int = 0
+    disk_used_bytes: int = 0
+    disk_used_percent: float = 0
+    system_uptime_seconds: float = 0
+    zram_enabled: bool = False
+    zram_device_count: int = 0
+    zram_total_bytes: int = 0
+    zram_used_bytes: int = 0
 
 
 class BridgeRuntimeConfig(BaseModel):
