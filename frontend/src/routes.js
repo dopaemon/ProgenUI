@@ -42,10 +42,7 @@
 import Dashboard from "layouts/dashboard";
 import Inbounds from "layouts/tables";
 import Clients from "layouts/billing";
-import SignIn from "layouts/authentication/sign-in";
-
 // Vision UI Dashboard React icons
-import { IoIosDocument } from "react-icons/io";
 import { IoStatsChart } from "react-icons/io5";
 import { IoHome } from "react-icons/io5";
 import { IoPeople } from "react-icons/io5";
@@ -76,16 +73,6 @@ const routes = [
     route: "/clients",
     icon: <IoPeople size="15px" color="inherit" />,
     component: Clients,
-    noCollapse: true,
-  },
-  {
-    type: "collapse",
-    name: "Sign In",
-    key: "sign-in",
-    route: "/authentication/sign-in",
-    icon: <IoIosDocument size="15px" color="inherit" />,
-    component: SignIn,
-    publicRoute: true,
     noCollapse: true,
   }
 ];
