@@ -46,6 +46,7 @@ class BridgeClientStub:
                 "active_client_count": 3,
                 "cpu_core_count": 8,
                 "cpu_usage_percent": 21.5,
+                "cpu_core_usage_percent": [17.2, 24.8, 12.5, 31.1, 8.4, 19.6, 26.7, 14.3],
                 "load_average_1m": 0.35,
                 "load_average_5m": 0.41,
                 "load_average_15m": 0.52,
@@ -289,6 +290,7 @@ def test_system_health_exposes_bridge_runtime_details(admin_user: Admin) -> None
     assert response.runtime_mode == "managed"
     assert response.xray_version == "Xray 26.1.13 (Xray, Penetrates Everything.) Custom"
     assert response.cpu_core_count == 8
+    assert len(response.cpu_core_usage_percent) == 8
     assert response.memory_used_percent == 50.0
     assert response.zram_enabled is True
 

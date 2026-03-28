@@ -37,6 +37,78 @@ function buildStatsSourceSummary(statsSource, xrayApiReachable, lastStatsError) 
   };
 }
 
+function SystemMetricCard({ title, value, detail }) {
+  return (
+    <Card>
+      <VuiBox p={3}>
+        <VuiTypography variant="button" color="text">
+          {title}
+        </VuiTypography>
+        <VuiTypography variant="h5" color="white" fontWeight="bold" mt={0.5}>
+          {value}
+        </VuiTypography>
+        <VuiTypography variant="caption" color="text" fontWeight="regular" mt={0.75}>
+          {detail}
+        </VuiTypography>
+      </VuiBox>
+    </Card>
+  );
+}
+
+function CPUUsageCard({ systemHealth }) {
+  const cpuCoreUsagePercentList = systemHealth?.cpu_core_usage_percent || [];
+
+  return (
+    <Card sx={{ height: "100%" }}>
+      <VuiBox p={3}>
+        <VuiTypography variant="button" color="text">
+          CPU usage
+        </VuiTypography>
+        <VuiTypography variant="h5" color="white" fontWeight="bold" mt={0.5}>
+          {formatPercent(systemHealth?.cpu_usage_percent)}
+        </VuiTypography>
+        <VuiTypography variant="caption" color="text" fontWeight="regular" mt={0.75}>
+          {systemHealth?.cpu_core_count || 0} cores
+        </VuiTypography>
+        <VuiBox
+          sx={{
+            mt: 2.5,
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+            gap: 1.5,
+          }}
+        >
+          {cpuCoreUsagePercentList.map((coreUsagePercent, coreIndex) => (
+            <VuiBox key={`cpu-core-${coreIndex}`}>
+              <VuiBox display="flex" alignItems="center" justifyContent="space-between" mb={0.5}>
+                <VuiTypography variant="caption" color="text">
+                  Core {coreIndex + 1}
+                </VuiTypography>
+                <VuiTypography variant="caption" color="white" fontWeight="bold">
+                  {formatPercent(coreUsagePercent)}
+                </VuiTypography>
+              </VuiBox>
+              <LinearProgress
+                variant="determinate"
+                value={Math.max(0, Math.min(100, Number(coreUsagePercent) || 0))}
+                sx={{
+                  height: 8,
+                  borderRadius: 999,
+                  backgroundColor: "rgba(255,255,255,0.08)",
+                  "& .MuiLinearProgress-bar": {
+                    borderRadius: 999,
+                    background: "linear-gradient(90deg, #0075FF 0%, #01B574 100%)",
+                  },
+                }}
+              />
+            </VuiBox>
+          ))}
+        </VuiBox>
+      </VuiBox>
+    </Card>
+  );
+}
+
 function Dashboard() {
   const [dashboardSummary, setDashboardSummary] = useState(null);
   const [trafficHistory, setTrafficHistory] = useState([]);
@@ -174,11 +246,6 @@ function Dashboard() {
   const systemMetricCardList = useMemo(
     () => [
       {
-        title: "CPU usage",
-        value: formatPercent(systemHealth?.cpu_usage_percent),
-        detail: `${systemHealth?.cpu_core_count || 0} cores`,
-      },
-      {
         title: "Memory",
         value: `${formatBytes(systemHealth?.memory_used_bytes || 0)} / ${formatBytes(
           systemHealth?.memory_total_bytes || 0
@@ -276,28 +343,7 @@ function Dashboard() {
         </VuiBox>
         <VuiBox mb={3}>
           <Grid container spacing={3}>
-            {systemMetricCardList.map((metricCard) => (
-              <Grid key={metricCard.title} item xs={12} md={6} xl={4}>
-                <Card>
-                  <VuiBox p={3}>
-                    <VuiTypography variant="button" color="text">
-                      {metricCard.title}
-                    </VuiTypography>
-                    <VuiTypography variant="h5" color="white" fontWeight="bold" mt={0.5}>
-                      {metricCard.value}
-                    </VuiTypography>
-                    <VuiTypography variant="caption" color="text" fontWeight="regular" mt={0.75}>
-                      {metricCard.detail}
-                    </VuiTypography>
-                  </VuiBox>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-        </VuiBox>
-        <VuiBox mb={3}>
-          <Grid container spacing={3}>
-            <Grid item xs={12} xl={8}>
+            <Grid item xs={12}>
               <Card>
                 <VuiBox p={3} sx={{ height: "100%" }}>
                   <VuiTypography variant="lg" color="white" fontWeight="bold" mb="5px">
@@ -322,7 +368,11 @@ function Dashboard() {
                 </VuiBox>
               </Card>
             </Grid>
-            <Grid item xs={12} xl={4}>
+          </Grid>
+        </VuiBox>
+        <VuiBox mb={3}>
+          <Grid container spacing={3}>
+            <Grid item xs={12} xl={7}>
               <Card>
                 <VuiBox p={3}>
                   <VuiTypography variant="lg" color="white" fontWeight="bold" mb="5px">
@@ -481,6 +531,22 @@ function Dashboard() {
                   </Stack>
                 </VuiBox>
               </Card>
+            </Grid>
+            <Grid item xs={12} xl={5}>
+              <Grid container spacing={3}>
+                <Grid item xs={12}>
+                  <CPUUsageCard systemHealth={systemHealth} />
+                </Grid>
+                {systemMetricCardList.map((metricCard) => (
+                  <Grid key={metricCard.title} item xs={12} md={6}>
+                    <SystemMetricCard
+                      title={metricCard.title}
+                      value={metricCard.value}
+                      detail={metricCard.detail}
+                    />
+                  </Grid>
+                ))}
+              </Grid>
             </Grid>
           </Grid>
         </VuiBox>

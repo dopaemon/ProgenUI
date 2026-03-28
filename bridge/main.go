@@ -231,6 +231,8 @@ type XraySupervisor struct {
 	systemMetrics      SystemMetrics
 	previousCPUIdle    uint64
 	previousCPUTotal   uint64
+	previousCoreIdles  []uint64
+	previousCoreTotals []uint64
 	hasPreviousCPUSnap bool
 	configuration      ApplicationConfiguration
 	bridgeState        *BridgeState
@@ -239,6 +241,7 @@ type XraySupervisor struct {
 type SystemMetrics struct {
 	CPUCoreCount        int
 	CPUUsagePercent     float64
+	CPUCoreUsagePercent []float64
 	LoadAverage1m       float64
 	LoadAverage5m       float64
 	LoadAverage15m      float64
@@ -429,6 +432,7 @@ func (supervisor *XraySupervisor) Status() gin.H {
 		"active_client_count":  supervisor.bridgeState.CountActiveClients(),
 		"cpu_core_count":       supervisor.systemMetrics.CPUCoreCount,
 		"cpu_usage_percent":    supervisor.systemMetrics.CPUUsagePercent,
+		"cpu_core_usage_percent": supervisor.systemMetrics.CPUCoreUsagePercent,
 		"load_average_1m":      supervisor.systemMetrics.LoadAverage1m,
 		"load_average_5m":      supervisor.systemMetrics.LoadAverage5m,
 		"load_average_15m":     supervisor.systemMetrics.LoadAverage15m,
@@ -478,7 +482,7 @@ func (supervisor *XraySupervisor) refreshBinaryMetadata() {
 }
 
 func (supervisor *XraySupervisor) refreshSystemMetrics() {
-	cpuUsagePercent, currentIdle, currentTotal, hasCPUSnapshot := supervisor.readCPUUsagePercent()
+	cpuUsagePercent, cpuCoreUsagePercent, currentIdle, currentTotal, currentCoreIdles, currentCoreTotals, hasCPUSnapshot := supervisor.readCPUUsagePercent()
 	loadAverage1m, loadAverage5m, loadAverage15m := readLoadAverage()
 	memoryTotalBytes, memoryAvailableBytes, memoryUsedBytes, memoryUsedPercent := readMemoryMetrics()
 	diskTotalBytes, diskFreeBytes, diskUsedBytes, diskUsedPercent := readDiskMetrics(supervisor.configuration.XrayConfigurationPath)
@@ -491,6 +495,7 @@ func (supervisor *XraySupervisor) refreshSystemMetrics() {
 	supervisor.systemMetrics = SystemMetrics{
 		CPUCoreCount:         runtime.NumCPU(),
 		CPUUsagePercent:      cpuUsagePercent,
+		CPUCoreUsagePercent:  cpuCoreUsagePercent,
 		LoadAverage1m:        loadAverage1m,
 		LoadAverage5m:        loadAverage5m,
 		LoadAverage15m:       loadAverage15m,
@@ -512,44 +517,87 @@ func (supervisor *XraySupervisor) refreshSystemMetrics() {
 	if hasCPUSnapshot {
 		supervisor.previousCPUIdle = currentIdle
 		supervisor.previousCPUTotal = currentTotal
+		supervisor.previousCoreIdles = currentCoreIdles
+		supervisor.previousCoreTotals = currentCoreTotals
 		supervisor.hasPreviousCPUSnap = true
 	}
 }
 
-func (supervisor *XraySupervisor) readCPUUsagePercent() (float64, uint64, uint64, bool) {
-	currentIdle, currentTotal, errorValue := readCPUStatSnapshot()
+func (supervisor *XraySupervisor) readCPUUsagePercent() (float64, []float64, uint64, uint64, []uint64, []uint64, bool) {
+	currentIdle, currentTotal, currentCoreIdles, currentCoreTotals, errorValue := readCPUStatSnapshot()
 	if errorValue != nil {
-		return 0, 0, 0, false
+		return 0, nil, 0, 0, nil, nil, false
 	}
 
 	supervisor.mutex.Lock()
 	previousIdle := supervisor.previousCPUIdle
 	previousTotal := supervisor.previousCPUTotal
+	previousCoreIdles := append([]uint64(nil), supervisor.previousCoreIdles...)
+	previousCoreTotals := append([]uint64(nil), supervisor.previousCoreTotals...)
 	hasPreviousSnapshot := supervisor.hasPreviousCPUSnap
 	supervisor.mutex.Unlock()
 
 	if !hasPreviousSnapshot || currentTotal <= previousTotal {
-		return 0, currentIdle, currentTotal, true
+		return 0, buildZeroPercentList(len(currentCoreTotals)), currentIdle, currentTotal, currentCoreIdles, currentCoreTotals, true
 	}
 
 	idleDelta := currentIdle - previousIdle
 	totalDelta := currentTotal - previousTotal
 	if totalDelta == 0 {
-		return 0, currentIdle, currentTotal, true
+		return 0, buildZeroPercentList(len(currentCoreTotals)), currentIdle, currentTotal, currentCoreIdles, currentCoreTotals, true
 	}
 
 	usagePercent := 100 * (1 - (float64(idleDelta) / float64(totalDelta)))
-	return roundToTwoDecimals(usagePercent), currentIdle, currentTotal, true
+	coreUsagePercentList := buildCPUCoreUsagePercentList(
+		currentCoreIdles,
+		currentCoreTotals,
+		previousCoreIdles,
+		previousCoreTotals,
+	)
+	return roundToTwoDecimals(usagePercent), coreUsagePercentList, currentIdle, currentTotal, currentCoreIdles, currentCoreTotals, true
 }
 
-func readCPUStatSnapshot() (uint64, uint64, error) {
-	cpuStatLine, errorValue := readFirstLine("/proc/stat")
+func readCPUStatSnapshot() (uint64, uint64, []uint64, []uint64, error) {
+	procStatContents, errorValue := os.ReadFile("/proc/stat")
 	if errorValue != nil {
-		return 0, 0, errorValue
+		return 0, 0, nil, nil, errorValue
 	}
 
+	procStatLines := strings.Split(strings.TrimSpace(string(procStatContents)), "\n")
+	if len(procStatLines) == 0 {
+		return 0, 0, nil, nil, errors.New("invalid /proc/stat contents")
+	}
+
+	totalIdle, totalAll, errorValue := parseCPUStatLine(procStatLines[0], "cpu")
+	if errorValue != nil {
+		return 0, 0, nil, nil, errorValue
+	}
+
+	coreIdles := make([]uint64, 0)
+	coreTotals := make([]uint64, 0)
+	for _, procStatLine := range procStatLines[1:] {
+		if !strings.HasPrefix(procStatLine, "cpu") {
+			break
+		}
+		cpuFields := strings.Fields(procStatLine)
+		if len(cpuFields) == 0 || !strings.HasPrefix(cpuFields[0], "cpu") || cpuFields[0] == "cpu" {
+			continue
+		}
+
+		coreIdle, coreTotal, parseError := parseCPUStatLine(procStatLine, cpuFields[0])
+		if parseError != nil {
+			continue
+		}
+		coreIdles = append(coreIdles, coreIdle)
+		coreTotals = append(coreTotals, coreTotal)
+	}
+
+	return totalIdle, totalAll, coreIdles, coreTotals, nil
+}
+
+func parseCPUStatLine(cpuStatLine string, expectedPrefix string) (uint64, uint64, error) {
 	cpuFields := strings.Fields(cpuStatLine)
-	if len(cpuFields) < 8 || cpuFields[0] != "cpu" {
+	if len(cpuFields) < 8 || cpuFields[0] != expectedPrefix {
 		return 0, 0, errors.New("invalid /proc/stat cpu line")
 	}
 
@@ -570,6 +618,46 @@ func readCPUStatSnapshot() (uint64, uint64, error) {
 	}
 
 	return idle, total, nil
+}
+
+func buildCPUCoreUsagePercentList(
+	currentCoreIdles []uint64,
+	currentCoreTotals []uint64,
+	previousCoreIdles []uint64,
+	previousCoreTotals []uint64,
+) []float64 {
+	coreCount := len(currentCoreTotals)
+	if len(previousCoreTotals) < coreCount || len(previousCoreIdles) < coreCount {
+		return buildZeroPercentList(coreCount)
+	}
+
+	coreUsagePercentList := make([]float64, 0, coreCount)
+	for index := 0; index < coreCount; index += 1 {
+		if currentCoreTotals[index] <= previousCoreTotals[index] {
+			coreUsagePercentList = append(coreUsagePercentList, 0)
+			continue
+		}
+
+		totalDelta := currentCoreTotals[index] - previousCoreTotals[index]
+		idleDelta := currentCoreIdles[index] - previousCoreIdles[index]
+		if totalDelta == 0 {
+			coreUsagePercentList = append(coreUsagePercentList, 0)
+			continue
+		}
+
+		coreUsagePercent := 100 * (1 - (float64(idleDelta) / float64(totalDelta)))
+		coreUsagePercentList = append(coreUsagePercentList, roundToTwoDecimals(coreUsagePercent))
+	}
+
+	return coreUsagePercentList
+}
+
+func buildZeroPercentList(length int) []float64 {
+	if length <= 0 {
+		return []float64{}
+	}
+
+	return make([]float64, length)
 }
 
 func readLoadAverage() (float64, float64, float64) {

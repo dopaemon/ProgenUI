@@ -155,6 +155,7 @@ class BridgeRuntimeStatus(BaseModel):
     active_client_count: int = 0
     cpu_core_count: int = 0
     cpu_usage_percent: float = 0
+    cpu_core_usage_percent: list[float] = []
     load_average_1m: float = 0
     load_average_5m: float = 0
     load_average_15m: float = 0
