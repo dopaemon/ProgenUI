@@ -6,15 +6,12 @@ RUN go mod download
 COPY . .
 RUN go build -o /out/bridge .
 
-FROM alpine:3.20 AS xray_downloader
+FROM python:3.12-alpine AS xray_downloader
 
-ARG XRAY_VERSION=v26.1.13
-
-RUN apk add --no-cache ca-certificates unzip wget
+RUN apk add --no-cache ca-certificates unzip
 WORKDIR /tmp/xray
-RUN wget -O xray.zip "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip" \
-  && unzip xray.zip \
-  && chmod +x xray
+COPY scripts/download_xray_release.py /tmp/download_xray_release.py
+RUN python3 /tmp/download_xray_release.py --output-directory /tmp/xray
 
 FROM alpine:3.20
 WORKDIR /app

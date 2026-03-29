@@ -42,18 +42,22 @@ import bgSignIn from "assets/images/signInImage.png";
 
 function SignIn() {
   const { signIn, isAuthenticated } = useAuthentication();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin123");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event) {
     event.preventDefault();
     setErrorMessage("");
+    setIsSubmitting(true);
 
     try {
       await signIn(username, password);
     } catch (error) {
       setErrorMessage(error.message || "Sign in failed.");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -63,11 +67,11 @@ function SignIn() {
 
   return (
     <CoverLayout
-      title="Nice to see you!"
+      title="Sign in to ProgenUI"
       color="white"
-      description="Enter your email and password to sign in"
-      premotto="INSPIRED BY THE FUTURE:"
-      motto="THE VISION UI DASHBOARD"
+      description="Use your admin account to manage Xray inbounds, clients, and traffic."
+      premotto="XRAY CONTROL PLANE"
+      motto="PROGENUI"
       image={bgSignIn}
     >
       <VuiBox component="form" role="form" onSubmit={handleSubmit}>
@@ -89,9 +93,10 @@ function SignIn() {
           >
             <VuiInput
               type="text"
-              placeholder="Your username..."
+              placeholder="Enter admin username"
               fontWeight="500"
               value={username}
+              autoComplete="username"
               onChange={(event) => setUsername(event.target.value)}
             />
           </GradientBorder>
@@ -114,8 +119,9 @@ function SignIn() {
           >
             <VuiInput
               type="password"
-              placeholder="Your password..."
+              placeholder="Enter password"
               value={password}
+              autoComplete="current-password"
               onChange={(event) => setPassword(event.target.value)}
               sx={({ typography: { size } }) => ({
                 fontSize: size.sm,
@@ -131,8 +137,8 @@ function SignIn() {
           </VuiBox>
         ) : null}
         <VuiBox mt={4} mb={1}>
-          <VuiButton color="info" fullWidth type="submit">
-            SIGN IN
+          <VuiButton color="info" fullWidth type="submit" disabled={isSubmitting}>
+            {isSubmitting ? "Signing in..." : "Sign In"}
           </VuiButton>
         </VuiBox>
       </VuiBox>
