@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import Grid from "@mui/material/Grid";
+import LinearProgress from "@mui/material/LinearProgress";
 import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import Switch from "@mui/material/Switch";
@@ -13,6 +14,7 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 
+import VuiAlert from "components/VuiAlert";
 import VuiBox from "components/VuiBox";
 import VuiTypography from "components/VuiTypography";
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
@@ -61,9 +63,13 @@ function Billing() {
   const [inboundList, setInboundList] = useState([]);
   const [clientForm, setClientForm] = useState(defaultClientForm);
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function loadPageData() {
     try {
+      setIsLoading(true);
       const [clients, inbounds] = await Promise.all([listClients(), listInbounds()]);
       setClientList(clients);
       setInboundList(inbounds);
@@ -73,6 +79,8 @@ function Billing() {
       }));
     } catch (error) {
       setErrorMessage(error.message || "Unable to load clients.");
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -89,6 +97,8 @@ function Billing() {
   async function handleSubmit(event) {
     event.preventDefault();
     setErrorMessage("");
+    setSuccessMessage("");
+    setIsSubmitting(true);
 
     const clientPayload = {
       inbound_id: Number(clientForm.inbound_id),
@@ -102,8 +112,10 @@ function Billing() {
     try {
       if (isEditingClient) {
         await updateClient(clientForm.id, clientPayload);
+        setSuccessMessage("Client updated successfully.");
       } else {
         await createClient(clientPayload);
+        setSuccessMessage("Client created successfully.");
       }
 
       setClientForm({
@@ -113,10 +125,14 @@ function Billing() {
       await loadPageData();
     } catch (error) {
       setErrorMessage(error.message || "Unable to save client.");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
   async function handleDelete(clientId) {
+    setErrorMessage("");
+    setSuccessMessage("");
     try {
       await deleteClient(clientId);
       if (clientForm.id === clientId) {
@@ -126,6 +142,7 @@ function Billing() {
         });
       }
       await loadPageData();
+      setSuccessMessage("Client deleted successfully.");
     } catch (error) {
       setErrorMessage(error.message || "Unable to delete client.");
     }
@@ -141,6 +158,17 @@ function Billing() {
               <VuiTypography variant="lg" color="white" fontWeight="bold" mb={2}>
                 {isEditingClient ? "Edit Client" : "Create Client"}
               </VuiTypography>
+              {errorMessage ? (
+                <VuiBox mb={2}>
+                  <VuiAlert color="error">{errorMessage}</VuiAlert>
+                </VuiBox>
+              ) : null}
+              {successMessage ? (
+                <VuiBox mb={2}>
+                  <VuiAlert color="success">{successMessage}</VuiAlert>
+                </VuiBox>
+              ) : null}
+              {isLoading ? <LinearProgress sx={{ mb: 2 }} /> : null}
               <VuiBox component="form" onSubmit={handleSubmit}>
                 <Stack spacing={2}>
                   <TextField
@@ -202,17 +230,17 @@ function Billing() {
                       Enabled
                     </VuiTypography>
                   </Stack>
-                  {errorMessage ? (
-                    <VuiTypography variant="caption" color="error">
-                      {errorMessage}
-                    </VuiTypography>
-                  ) : null}
                   <Stack direction="row" spacing={2}>
-                    <Button variant="contained" type="submit">
-                      {isEditingClient ? "Update Client" : "Create Client"}
+                    <Button variant="contained" type="submit" disabled={isSubmitting}>
+                      {isSubmitting
+                        ? "Saving..."
+                        : isEditingClient
+                          ? "Update Client"
+                          : "Create Client"}
                     </Button>
                     <Button
                       variant="outlined"
+                      disabled={isSubmitting}
                       onClick={() =>
                         setClientForm({
                           ...defaultClientForm,
@@ -232,6 +260,7 @@ function Billing() {
               <VuiTypography variant="lg" color="white" fontWeight="bold" mb={2}>
                 Client Inventory
               </VuiTypography>
+              {isLoading ? <LinearProgress sx={{ mb: 2 }} /> : null}
               <TableContainer>
                 <Table>
                   <TableHead>
@@ -246,6 +275,11 @@ function Billing() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
+                    {!clientList.length ? (
+                      <TableRow>
+                        <TableCell colSpan={7}>No clients created yet.</TableCell>
+                      </TableRow>
+                    ) : null}
                     {clientList.map((client) => {
                       const inbound = inboundList.find(
                         (currentInbound) => currentInbound.id === client.inbound_id
@@ -284,6 +318,7 @@ function Billing() {
                               <Button
                                 color="error"
                                 variant="outlined"
+                                disabled={isSubmitting}
                                 onClick={() => handleDelete(client.id)}
                               >
                                 Delete

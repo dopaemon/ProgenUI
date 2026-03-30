@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Card from "@mui/material/Card";
 import Grid from "@mui/material/Grid";
+import LinearProgress from "@mui/material/LinearProgress";
 import Stack from "@mui/material/Stack";
 
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
@@ -8,6 +9,7 @@ import DashboardNavbar from "examples/Navbars/DashboardNavbar";
 import Footer from "examples/Footer";
 import MiniStatisticsCard from "examples/Cards/StatisticsCards/MiniStatisticsCard";
 import LineChart from "examples/Charts/LineCharts/LineChart";
+import VuiAlert from "components/VuiAlert";
 import VuiBox from "components/VuiBox";
 import VuiTypography from "components/VuiTypography";
 import { IoBuild, IoCloudOffline, IoPeople, IoPulse } from "react-icons/io5";
@@ -24,6 +26,7 @@ function Dashboard() {
   const [trafficHistory, setTrafficHistory] = useState([]);
   const [systemHealth, setSystemHealth] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
@@ -46,6 +49,10 @@ function Dashboard() {
       } catch (error) {
         if (isMounted) {
           setErrorMessage(error.message || "Unable to load dashboard.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
         }
       }
     }
@@ -131,15 +138,16 @@ function Dashboard() {
           <VuiTypography variant="h4" color="white" fontWeight="bold">
             ProgenUI Dashboard
           </VuiTypography>
-          <VuiTypography variant="button" color="text">
-            Live traffic, node health, and control plane overview.
-          </VuiTypography>
-          {errorMessage ? (
-            <VuiTypography display="block" variant="caption" color="error" mt={1}>
-              {errorMessage}
-            </VuiTypography>
-          ) : null}
-        </VuiBox>
+        <VuiTypography variant="button" color="text">
+          Live traffic, node health, and control plane overview.
+        </VuiTypography>
+        {errorMessage ? (
+          <VuiBox mt={2}>
+            <VuiAlert color="error">{errorMessage}</VuiAlert>
+          </VuiBox>
+        ) : null}
+        {isLoading ? <LinearProgress sx={{ mt: 2 }} /> : null}
+      </VuiBox>
         <VuiBox mb={3}>
           <Grid container spacing={3}>
             <Grid item xs={12} md={6} xl={3}>

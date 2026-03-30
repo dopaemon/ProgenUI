@@ -29,8 +29,7 @@ function clearStoredAuthentication() {
 async function sendRequest(path, requestOptions = {}) {
   const response = await fetch(`${apiBaseUrl}${path}`, requestOptions);
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || "Request failed");
+    throw new Error(await readErrorMessage(response));
   }
 
   if (response.status === 204) {
@@ -38,6 +37,24 @@ async function sendRequest(path, requestOptions = {}) {
   }
 
   return response.json();
+}
+
+async function readErrorMessage(response) {
+  const responseText = await response.text();
+
+  if (!responseText) {
+    return "Request failed";
+  }
+
+  try {
+    const parsedResponse = JSON.parse(responseText);
+    if (typeof parsedResponse.detail === "string") {
+      return parsedResponse.detail;
+    }
+    return responseText;
+  } catch {
+    return responseText;
+  }
 }
 
 async function refreshAuthenticatedSession(refreshToken) {
@@ -88,8 +105,7 @@ async function sendAuthenticatedRequest(path, requestOptions = {}, allowRetry = 
   }
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || "Request failed");
+    throw new Error(await readErrorMessage(response));
   }
 
   if (response.status === 204) {

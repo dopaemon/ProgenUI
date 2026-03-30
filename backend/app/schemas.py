@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+import json
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class TokenPair(BaseModel):
@@ -26,6 +28,30 @@ class InboundBase(BaseModel):
     security: str = "none"
     settings_json: str = "{}"
     enabled: bool = True
+
+    @field_validator("protocol")
+    @classmethod
+    def validate_protocol(cls, value: str) -> str:
+        normalized_value = value.strip().lower()
+        if normalized_value not in {"vless", "trojan"}:
+            raise ValueError("Protocol must be either 'vless' or 'trojan'")
+        return normalized_value
+
+    @field_validator("transport")
+    @classmethod
+    def normalize_transport(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("security")
+    @classmethod
+    def normalize_security(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("settings_json")
+    @classmethod
+    def validate_settings_json(cls, value: str) -> str:
+        json.loads(value)
+        return value
 
 
 class InboundCreate(InboundBase):
@@ -57,6 +83,22 @@ class ClientBase(BaseModel):
     traffic_limit_bytes: int = Field(default=0, ge=0)
     expiry_at: datetime | None = None
     enabled: bool = True
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        normalized_value = value.strip().lower()
+        if "@" not in normalized_value:
+            raise ValueError("Email must contain '@'")
+        return normalized_value
+
+    @field_validator("uuid")
+    @classmethod
+    def normalize_uuid(cls, value: str) -> str:
+        normalized_value = value.strip().lower()
+        if not normalized_value:
+            raise ValueError("UUID cannot be empty")
+        return normalized_value
 
 
 class ClientCreate(ClientBase):
