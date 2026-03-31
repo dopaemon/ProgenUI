@@ -1,0 +1,123 @@
+syntax = "proto3";
+
+package progenui.bridge;
+
+import "google/protobuf/struct.proto";
+
+service BridgeService {
+  rpc GetRuntimeStatus (Empty) returns (RuntimeStatusResponse);
+  rpc GetRuntimeConfig (Empty) returns (RuntimeConfigResponse);
+  rpc ListClientStats (ListClientStatsRequest) returns (ListClientStatsResponse);
+  rpc ApplyInbound (ApplyInboundRequest) returns (ApplyInboundResponse);
+  rpc RemoveInbound (RemoveInboundRequest) returns (RemoveInboundResponse);
+  rpc RemoveClient (RemoveClientRequest) returns (RemoveClientResponse);
+}
+
+message Empty {}
+
+message ClientPayload {
+  int64 id = 1;
+  int64 inbound_id = 2;
+  string email = 3;
+  string uuid = 4;
+  int64 traffic_limit_bytes = 5;
+  int64 used_bytes = 6;
+  string expiry_at = 7;
+  bool enabled = 8;
+}
+
+message InboundPayload {
+  int64 id = 1;
+  string name = 2;
+  string protocol = 3;
+  int64 listen_port = 4;
+  string transport = 5;
+  string security = 6;
+  string settings_json = 7;
+  bool enabled = 8;
+  repeated ClientPayload clients = 9;
+}
+
+message ApplyInboundRequest {
+  InboundPayload inbound = 1;
+}
+
+message ApplyInboundResponse {
+  string status = 1;
+  int64 inbound_id = 2;
+  int64 active_clients = 3;
+  string configuration = 4;
+}
+
+message RemoveInboundRequest {
+  int64 inbound_id = 1;
+}
+
+message RemoveInboundResponse {
+  string status = 1;
+  int64 inbound_id = 2;
+}
+
+message RemoveClientRequest {
+  string uuid = 1;
+}
+
+message RemoveClientResponse {
+  string status = 1;
+  string uuid = 2;
+}
+
+message ListClientStatsRequest {
+  repeated string uuids = 1;
+}
+
+message ClientStats {
+  string uuid = 1;
+  int64 uplink_bytes = 2;
+  int64 downlink_bytes = 3;
+}
+
+message ListClientStatsResponse {
+  repeated ClientStats clients = 1;
+}
+
+message RuntimeStatusResponse {
+  bool xray_running = 1;
+  int64 api_port = 2;
+  string binary_path = 3;
+  string xray_version = 4;
+  bool binary_detected = 5;
+  bool xray_api_reachable = 6;
+  string last_health_check_at = 7;
+  string runtime_mode = 8;
+  string config_path = 9;
+  string last_error = 10;
+  string stats_source = 11;
+  string last_stats_error = 12;
+  string last_stats_sync_at = 13;
+  int64 inbound_count = 14;
+  int64 active_client_count = 15;
+  int64 cpu_core_count = 16;
+  double cpu_usage_percent = 17;
+  repeated double cpu_core_usage_percent = 18;
+  double load_average_1m = 19;
+  double load_average_5m = 20;
+  double load_average_15m = 21;
+  uint64 memory_total_bytes = 22;
+  uint64 memory_available_bytes = 23;
+  uint64 memory_used_bytes = 24;
+  double memory_used_percent = 25;
+  uint64 disk_total_bytes = 26;
+  uint64 disk_free_bytes = 27;
+  uint64 disk_used_bytes = 28;
+  double disk_used_percent = 29;
+  double system_uptime_seconds = 30;
+  bool zram_enabled = 31;
+  int64 zram_device_count = 32;
+  uint64 zram_total_bytes = 33;
+  uint64 zram_used_bytes = 34;
+}
+
+message RuntimeConfigResponse {
+  google.protobuf.Struct config = 1;
+}

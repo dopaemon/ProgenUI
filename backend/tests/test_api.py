@@ -24,53 +24,65 @@ from app.schemas import ClientCreate, ClientUpdate, InboundCreate, LoginRequest
 
 class BridgeClientStub:
     def __init__(self) -> None:
-        self.post_calls: list[tuple[str, dict]] = []
+        self.apply_inbound_calls: list[dict] = []
+        self.remove_inbound_calls: list[int] = []
+        self.remove_client_calls: list[str] = []
 
-    async def get(self, path: str, query_parameters=None) -> dict:
-        if path == "/runtime/status":
-            return {
-                "xray_running": True,
-                "api_port": 10085,
-                "binary_path": "/usr/local/bin/xray",
-                "xray_version": "Xray 26.1.13 (Xray, Penetrates Everything.) Custom",
-                "binary_detected": True,
-                "xray_api_reachable": True,
-                "last_health_check_at": "2026-03-31T00:00:00Z",
-                "runtime_mode": "managed",
-                "config_path": "/etc/xray/config.json",
-                "last_error": None,
-                "stats_source": "xray_api",
-                "last_stats_error": None,
-                "last_stats_sync_at": "2026-03-31T00:00:00Z",
-                "inbound_count": 2,
-                "active_client_count": 3,
-                "cpu_core_count": 8,
-                "cpu_usage_percent": 21.5,
-                "cpu_core_usage_percent": [17.2, 24.8, 12.5, 31.1, 8.4, 19.6, 26.7, 14.3],
-                "load_average_1m": 0.35,
-                "load_average_5m": 0.41,
-                "load_average_15m": 0.52,
-                "memory_total_bytes": 17179869184,
-                "memory_available_bytes": 8589934592,
-                "memory_used_bytes": 8589934592,
-                "memory_used_percent": 50.0,
-                "disk_total_bytes": 536870912000,
-                "disk_free_bytes": 268435456000,
-                "disk_used_bytes": 268435456000,
-                "disk_used_percent": 50.0,
-                "system_uptime_seconds": 86400.0,
-                "zram_enabled": True,
-                "zram_device_count": 1,
-                "zram_total_bytes": 4294967296,
-                "zram_used_bytes": 1073741824,
-            }
-        if path == "/stats/clients":
-            return {"clients": []}
-        return {}
+    async def get_runtime_status(self) -> dict:
+        return {
+            "xray_running": True,
+            "api_port": 10085,
+            "binary_path": "/usr/local/bin/xray",
+            "xray_version": "Xray 26.1.13 (Xray, Penetrates Everything.) Custom",
+            "binary_detected": True,
+            "xray_api_reachable": True,
+            "last_health_check_at": "2026-03-31T00:00:00Z",
+            "runtime_mode": "managed",
+            "config_path": "/etc/xray/config.json",
+            "last_error": None,
+            "stats_source": "xray_api",
+            "last_stats_error": None,
+            "last_stats_sync_at": "2026-03-31T00:00:00Z",
+            "inbound_count": 2,
+            "active_client_count": 3,
+            "cpu_core_count": 8,
+            "cpu_usage_percent": 21.5,
+            "cpu_core_usage_percent": [17.2, 24.8, 12.5, 31.1, 8.4, 19.6, 26.7, 14.3],
+            "load_average_1m": 0.35,
+            "load_average_5m": 0.41,
+            "load_average_15m": 0.52,
+            "memory_total_bytes": 17179869184,
+            "memory_available_bytes": 8589934592,
+            "memory_used_bytes": 8589934592,
+            "memory_used_percent": 50.0,
+            "disk_total_bytes": 536870912000,
+            "disk_free_bytes": 268435456000,
+            "disk_used_bytes": 268435456000,
+            "disk_used_percent": 50.0,
+            "system_uptime_seconds": 86400.0,
+            "zram_enabled": True,
+            "zram_device_count": 1,
+            "zram_total_bytes": 4294967296,
+            "zram_used_bytes": 1073741824,
+        }
 
-    async def post(self, path: str, payload: dict) -> dict:
-        self.post_calls.append((path, payload))
-        return {"status": "ok", "path": path, "payload": payload}
+    async def get_runtime_config(self) -> dict:
+        return {"config": {"log": {"loglevel": "warning"}}}
+
+    async def list_client_stats(self, client_uuids: list[str]) -> dict:
+        return {"clients": [{"uuid": client_uuid, "uplink_bytes": 0, "downlink_bytes": 0} for client_uuid in client_uuids]}
+
+    async def apply_inbound(self, inbound: dict) -> dict:
+        self.apply_inbound_calls.append(inbound)
+        return {"status": "applied", "inbound_id": inbound["id"]}
+
+    async def remove_inbound(self, inbound_id: int) -> dict:
+        self.remove_inbound_calls.append(inbound_id)
+        return {"status": "removed", "inbound_id": inbound_id}
+
+    async def remove_client(self, client_uuid: str) -> dict:
+        self.remove_client_calls.append(client_uuid)
+        return {"status": "removed", "uuid": client_uuid}
 
 
 @pytest.fixture()
@@ -331,37 +343,32 @@ def test_sync_all_inbounds_to_bridge_rehydrates_runtime(
         )
     )
 
-    bridge_client_stub.post_calls.clear()
+    bridge_client_stub.apply_inbound_calls.clear()
 
     run_async(sync_all_inbounds_to_bridge(database_session))
 
     assert created_client.id is not None
-    assert bridge_client_stub.post_calls == [
-        (
-            "/inbounds/apply",
-            {
-                "inbound": {
-                    "id": inbound.id,
-                    "name": "restored-inbound",
-                    "protocol": "vless",
-                    "listen_port": 11443,
-                    "transport": "tcp",
-                    "security": "none",
-                    "settings_json": "{}",
+    assert bridge_client_stub.apply_inbound_calls == [
+        {
+            "id": inbound.id,
+            "name": "restored-inbound",
+            "protocol": "vless",
+            "listen_port": 11443,
+            "transport": "tcp",
+            "security": "none",
+            "settings_json": "{}",
+            "enabled": True,
+            "clients": [
+                {
+                    "id": created_client.id,
+                    "inbound_id": inbound.id,
+                    "email": "restore@example.com",
+                    "uuid": "55555555-5555-5555-5555-555555555555",
+                    "traffic_limit_bytes": 0,
+                    "used_bytes": 0,
+                    "expiry_at": None,
                     "enabled": True,
-                    "clients": [
-                        {
-                            "id": created_client.id,
-                            "inbound_id": inbound.id,
-                            "email": "restore@example.com",
-                            "uuid": "55555555-5555-5555-5555-555555555555",
-                            "traffic_limit_bytes": 0,
-                            "used_bytes": 0,
-                            "expiry_at": None,
-                            "enabled": True,
-                        }
-                    ],
                 }
-            },
-        )
+            ],
+        }
     ]

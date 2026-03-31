@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_minutes: int = Field(default=30, alias="JWT_ACCESS_MINUTES")
     jwt_refresh_minutes: int = Field(default=60 * 24 * 7, alias="JWT_REFRESH_MINUTES")
-    bridge_base_url: str = Field(default="http://bridge:8081", alias="BRIDGE_BASE_URL")
+    bridge_grpc_target: str = Field(default="bridge:50051", alias="BRIDGE_GRPC_TARGET")
     admin_username: str = Field(default="admin", alias="ADMIN_USERNAME")
     admin_password: str = Field(default="admin123", alias="ADMIN_PASSWORD")
     cors_origins: str = Field(default="http://localhost,http://localhost:3000", alias="CORS_ORIGINS")

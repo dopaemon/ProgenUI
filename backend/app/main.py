@@ -73,17 +73,17 @@ async def sync_all_inbounds_to_bridge(database_session: Session) -> None:
     inbound_list = database_session.query(Inbound).order_by(Inbound.id.asc()).all()
     for inbound in inbound_list:
         database_session.refresh(inbound)
-        await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(inbound)})
+        await bridge_client.apply_inbound(build_bridge_inbound_payload(inbound))
 
 
 async def sync_inbound_runtime(database_session: Session, inbound_id: int) -> None:
     inbound = database_session.query(Inbound).filter(Inbound.id == inbound_id).first()
     if not inbound:
-        await bridge_client.post("/inbounds/remove", {"inbound_id": inbound_id})
+        await bridge_client.remove_inbound(inbound_id)
         return
 
     database_session.refresh(inbound)
-    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(inbound)})
+    await bridge_client.apply_inbound(build_bridge_inbound_payload(inbound))
 
 
 def build_bridge_inbound_payload(inbound: Inbound) -> dict:
@@ -185,8 +185,7 @@ async def poll_bridge_stats_forever() -> None:
             try:
                 client_identifier_rows = database_session.query(Client.uuid).all()
                 client_identifiers = [client_identifier for (client_identifier,) in client_identifier_rows]
-                query_parameters = [("uuid", client_identifier) for client_identifier in client_identifiers]
-                bridge_stats = await bridge_client.get("/stats/clients", query_parameters=query_parameters)
+                bridge_stats = await bridge_client.list_client_stats(client_identifiers)
                 snapshot_result = persist_stats_snapshot(database_session, bridge_stats)
                 for affected_inbound_id in snapshot_result["affected_inbound_ids"]:
                     await sync_inbound_runtime(database_session, affected_inbound_id)
@@ -286,13 +285,13 @@ async def get_traffic_history(
 
 @app.get("/api/system/health", response_model=BridgeRuntimeStatus)
 async def get_system_health(_: Admin = Depends(get_current_admin)) -> BridgeRuntimeStatus:
-    bridge_runtime_status = await bridge_client.get("/runtime/status")
+    bridge_runtime_status = await bridge_client.get_runtime_status()
     return BridgeRuntimeStatus(**bridge_runtime_status)
 
 
 @app.get("/api/system/config", response_model=BridgeRuntimeConfig)
 async def get_system_config(_: Admin = Depends(get_current_admin)) -> BridgeRuntimeConfig:
-    bridge_runtime_config = await bridge_client.get("/runtime/config")
+    bridge_runtime_config = await bridge_client.get_runtime_config()
     return BridgeRuntimeConfig(**bridge_runtime_config)
 
 
@@ -317,7 +316,7 @@ async def create_inbound(
     database_session.add(inbound)
     save_database_changes(database_session)
     database_session.refresh(inbound)
-    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(inbound)})
+    await bridge_client.apply_inbound(build_bridge_inbound_payload(inbound))
     return inbound
 
 
@@ -344,7 +343,7 @@ async def update_inbound(
         setattr(inbound, field_name, field_value)
     save_database_changes(database_session)
     database_session.refresh(inbound)
-    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(inbound)})
+    await bridge_client.apply_inbound(build_bridge_inbound_payload(inbound))
     return inbound
 
 
@@ -360,7 +359,7 @@ async def delete_inbound(
     removed_inbound_id = inbound.id
     database_session.delete(inbound)
     save_database_changes(database_session)
-    await bridge_client.post("/inbounds/remove", {"inbound_id": removed_inbound_id})
+    await bridge_client.remove_inbound(removed_inbound_id)
     return {"status": "deleted"}
 
 
@@ -388,7 +387,7 @@ async def create_client(
     save_database_changes(database_session)
     database_session.refresh(client)
     database_session.refresh(client.inbound)
-    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(client.inbound)})
+    await bridge_client.apply_inbound(build_bridge_inbound_payload(client.inbound))
     return client
 
 
@@ -414,7 +413,7 @@ async def update_client(
     save_database_changes(database_session)
     database_session.refresh(client)
     database_session.refresh(client.inbound)
-    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(client.inbound)})
+    await bridge_client.apply_inbound(build_bridge_inbound_payload(client.inbound))
     return client
 
 
@@ -430,8 +429,8 @@ async def delete_client(
     database_session.delete(client)
     save_database_changes(database_session)
     database_session.refresh(inbound)
-    await bridge_client.post("/clients/remove", {"uuid": client_identifier})
-    await bridge_client.post("/inbounds/apply", {"inbound": build_bridge_inbound_payload(inbound)})
+    await bridge_client.remove_client(client_identifier)
+    await bridge_client.apply_inbound(build_bridge_inbound_payload(inbound))
     return {"status": "deleted"}
 
 

@@ -1,12 +1,12 @@
 # ProgenUI
 
-Monorepo scaffold for an X-UI-inspired control panel built with React, FastAPI, and Go.
+Monorepo scaffold for an X-UI-inspired control panel built with React, FastAPI, Go, and gRPC.
 
 ## Services
 
 - `frontend`: React + Vite admin UI
-- `backend`: FastAPI control plane with SQLite persistence
-- `bridge`: Go sidecar for Xray process/runtime integration
+- `backend`: FastAPI control plane with SQLite persistence and a gRPC client to the bridge
+- `bridge`: Go sidecar for Xray process/runtime integration, exposing both HTTP and gRPC
 - `deploy/nginx.conf`: Nginx reverse proxy and static serving config
 
 ## Quick start
@@ -25,4 +25,4 @@ Default admin credentials:
 - The bridge exposes stubbed Xray integration points and a real process supervisor shell.
 - The backend is the source of truth for inbounds, clients, and traffic samples.
 - The frontend is a local admin shell with dashboard, inbound management, and client management.
-
+- Public frontend traffic still goes through FastAPI REST; only the internal backend-to-bridge hop uses gRPC.

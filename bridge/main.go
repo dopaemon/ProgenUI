@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,10 +21,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/encoding"
+	"google.golang.org/grpc/status"
 )
 
 type ApplicationConfiguration struct {
 	Port                  string
+	GRPCPort              string
 	XrayBinaryPath        string
 	XrayConfigurationPath string
 	XrayAPIPort           int
@@ -64,10 +70,37 @@ type ClientRemoveRequest struct {
 	UUID string `json:"uuid"`
 }
 
+type Empty struct{}
+
+type ListClientStatsRequest struct {
+	UUIDs []string `json:"uuids"`
+}
+
 type ClientStats struct {
 	UUID          string `json:"uuid"`
 	UplinkBytes   int64  `json:"uplink_bytes"`
 	DownlinkBytes int64  `json:"downlink_bytes"`
+}
+
+type InboundApplyResponse struct {
+	Status        string `json:"status"`
+	InboundID     int    `json:"inbound_id"`
+	ActiveClients int    `json:"active_clients"`
+	Configuration string `json:"configuration"`
+}
+
+type InboundRemoveResponse struct {
+	Status    string `json:"status"`
+	InboundID int    `json:"inbound_id"`
+}
+
+type ClientRemoveResponse struct {
+	Status string `json:"status"`
+	UUID   string `json:"uuid"`
+}
+
+type ClientStatsListResponse struct {
+	Clients []ClientStats `json:"clients"`
 }
 
 type XrayStatsQueryResponse struct {
@@ -239,25 +272,66 @@ type XraySupervisor struct {
 }
 
 type SystemMetrics struct {
-	CPUCoreCount        int
-	CPUUsagePercent     float64
-	CPUCoreUsagePercent []float64
-	LoadAverage1m       float64
-	LoadAverage5m       float64
-	LoadAverage15m      float64
-	MemoryTotalBytes    uint64
+	CPUCoreCount         int
+	CPUUsagePercent      float64
+	CPUCoreUsagePercent  []float64
+	LoadAverage1m        float64
+	LoadAverage5m        float64
+	LoadAverage15m       float64
+	MemoryTotalBytes     uint64
 	MemoryAvailableBytes uint64
-	MemoryUsedBytes     uint64
-	MemoryUsedPercent   float64
-	DiskTotalBytes      uint64
-	DiskFreeBytes       uint64
-	DiskUsedBytes       uint64
-	DiskUsedPercent     float64
-	SystemUptimeSeconds float64
-	ZRAMEnabled         bool
-	ZRAMDeviceCount     int
-	ZRAMTotalBytes      uint64
-	ZRAMUsedBytes       uint64
+	MemoryUsedBytes      uint64
+	MemoryUsedPercent    float64
+	DiskTotalBytes       uint64
+	DiskFreeBytes        uint64
+	DiskUsedBytes        uint64
+	DiskUsedPercent      float64
+	SystemUptimeSeconds  float64
+	ZRAMEnabled          bool
+	ZRAMDeviceCount      int
+	ZRAMTotalBytes       uint64
+	ZRAMUsedBytes        uint64
+}
+
+type RuntimeStatusResponse struct {
+	XrayRunning          bool      `json:"xray_running"`
+	APIPort              int       `json:"api_port"`
+	BinaryPath           string    `json:"binary_path"`
+	XrayVersion          string    `json:"xray_version"`
+	BinaryDetected       bool      `json:"binary_detected"`
+	XrayAPIReachable     bool      `json:"xray_api_reachable"`
+	LastHealthCheckAt    string    `json:"last_health_check_at"`
+	RuntimeMode          string    `json:"runtime_mode"`
+	ConfigPath           string    `json:"config_path"`
+	LastError            string    `json:"last_error"`
+	StatsSource          string    `json:"stats_source"`
+	LastStatsError       string    `json:"last_stats_error"`
+	LastStatsSyncAt      string    `json:"last_stats_sync_at"`
+	InboundCount         int       `json:"inbound_count"`
+	ActiveClientCount    int       `json:"active_client_count"`
+	CPUCoreCount         int       `json:"cpu_core_count"`
+	CPUUsagePercent      float64   `json:"cpu_usage_percent"`
+	CPUCoreUsagePercent  []float64 `json:"cpu_core_usage_percent"`
+	LoadAverage1m        float64   `json:"load_average_1m"`
+	LoadAverage5m        float64   `json:"load_average_5m"`
+	LoadAverage15m       float64   `json:"load_average_15m"`
+	MemoryTotalBytes     uint64    `json:"memory_total_bytes"`
+	MemoryAvailableBytes uint64    `json:"memory_available_bytes"`
+	MemoryUsedBytes      uint64    `json:"memory_used_bytes"`
+	MemoryUsedPercent    float64   `json:"memory_used_percent"`
+	DiskTotalBytes       uint64    `json:"disk_total_bytes"`
+	DiskFreeBytes        uint64    `json:"disk_free_bytes"`
+	DiskUsedBytes        uint64    `json:"disk_used_bytes"`
+	DiskUsedPercent      float64   `json:"disk_used_percent"`
+	SystemUptimeSeconds  float64   `json:"system_uptime_seconds"`
+	ZRAMEnabled          bool      `json:"zram_enabled"`
+	ZRAMDeviceCount      int       `json:"zram_device_count"`
+	ZRAMTotalBytes       uint64    `json:"zram_total_bytes"`
+	ZRAMUsedBytes        uint64    `json:"zram_used_bytes"`
+}
+
+type RuntimeConfigResponse struct {
+	Config map[string]any `json:"config"`
 }
 
 func NewXraySupervisor(configuration ApplicationConfiguration, bridgeState *BridgeState) *XraySupervisor {
@@ -401,7 +475,7 @@ func (supervisor *XraySupervisor) recordMockStatsResult(requestedUUIDs []string,
 	return supervisor.bridgeState.BuildClientStats(requestedUUIDs)
 }
 
-func (supervisor *XraySupervisor) Status() gin.H {
+func (supervisor *XraySupervisor) Status() RuntimeStatusResponse {
 	supervisor.refreshRuntimeHealth()
 	supervisor.refreshSystemMetrics()
 
@@ -414,41 +488,41 @@ func (supervisor *XraySupervisor) Status() gin.H {
 		runtimeMode = "managed"
 	}
 
-	return gin.H{
-		"xray_running":         supervisor.processCommand != nil && supervisor.processCommand.Process != nil,
-		"api_port":             supervisor.configuration.XrayAPIPort,
-		"binary_path":          supervisor.configuration.XrayBinaryPath,
-		"xray_version":         supervisor.xrayBinaryVersion,
-		"binary_detected":      supervisor.xrayBinaryDetected,
-		"xray_api_reachable":   supervisor.xrayAPIReachable,
-		"last_health_check_at": supervisor.lastHealthCheckAt,
-		"runtime_mode":         runtimeMode,
-		"config_path":          supervisor.configuration.XrayConfigurationPath,
-		"last_error":           supervisor.lastError,
-		"stats_source":         supervisor.lastStatsSource,
-		"last_stats_error":     supervisor.lastStatsError,
-		"last_stats_sync_at":   supervisor.lastStatsSyncAt,
-		"inbound_count":        len(inboundList),
-		"active_client_count":  supervisor.bridgeState.CountActiveClients(),
-		"cpu_core_count":       supervisor.systemMetrics.CPUCoreCount,
-		"cpu_usage_percent":    supervisor.systemMetrics.CPUUsagePercent,
-		"cpu_core_usage_percent": supervisor.systemMetrics.CPUCoreUsagePercent,
-		"load_average_1m":      supervisor.systemMetrics.LoadAverage1m,
-		"load_average_5m":      supervisor.systemMetrics.LoadAverage5m,
-		"load_average_15m":     supervisor.systemMetrics.LoadAverage15m,
-		"memory_total_bytes":   supervisor.systemMetrics.MemoryTotalBytes,
-		"memory_available_bytes": supervisor.systemMetrics.MemoryAvailableBytes,
-		"memory_used_bytes":    supervisor.systemMetrics.MemoryUsedBytes,
-		"memory_used_percent":  supervisor.systemMetrics.MemoryUsedPercent,
-		"disk_total_bytes":     supervisor.systemMetrics.DiskTotalBytes,
-		"disk_free_bytes":      supervisor.systemMetrics.DiskFreeBytes,
-		"disk_used_bytes":      supervisor.systemMetrics.DiskUsedBytes,
-		"disk_used_percent":    supervisor.systemMetrics.DiskUsedPercent,
-		"system_uptime_seconds": supervisor.systemMetrics.SystemUptimeSeconds,
-		"zram_enabled":         supervisor.systemMetrics.ZRAMEnabled,
-		"zram_device_count":    supervisor.systemMetrics.ZRAMDeviceCount,
-		"zram_total_bytes":     supervisor.systemMetrics.ZRAMTotalBytes,
-		"zram_used_bytes":      supervisor.systemMetrics.ZRAMUsedBytes,
+	return RuntimeStatusResponse{
+		XrayRunning:          supervisor.processCommand != nil && supervisor.processCommand.Process != nil,
+		APIPort:              supervisor.configuration.XrayAPIPort,
+		BinaryPath:           supervisor.configuration.XrayBinaryPath,
+		XrayVersion:          supervisor.xrayBinaryVersion,
+		BinaryDetected:       supervisor.xrayBinaryDetected,
+		XrayAPIReachable:     supervisor.xrayAPIReachable,
+		LastHealthCheckAt:    supervisor.lastHealthCheckAt,
+		RuntimeMode:          runtimeMode,
+		ConfigPath:           supervisor.configuration.XrayConfigurationPath,
+		LastError:            supervisor.lastError,
+		StatsSource:          supervisor.lastStatsSource,
+		LastStatsError:       supervisor.lastStatsError,
+		LastStatsSyncAt:      supervisor.lastStatsSyncAt,
+		InboundCount:         len(inboundList),
+		ActiveClientCount:    supervisor.bridgeState.CountActiveClients(),
+		CPUCoreCount:         supervisor.systemMetrics.CPUCoreCount,
+		CPUUsagePercent:      supervisor.systemMetrics.CPUUsagePercent,
+		CPUCoreUsagePercent:  supervisor.systemMetrics.CPUCoreUsagePercent,
+		LoadAverage1m:        supervisor.systemMetrics.LoadAverage1m,
+		LoadAverage5m:        supervisor.systemMetrics.LoadAverage5m,
+		LoadAverage15m:       supervisor.systemMetrics.LoadAverage15m,
+		MemoryTotalBytes:     supervisor.systemMetrics.MemoryTotalBytes,
+		MemoryAvailableBytes: supervisor.systemMetrics.MemoryAvailableBytes,
+		MemoryUsedBytes:      supervisor.systemMetrics.MemoryUsedBytes,
+		MemoryUsedPercent:    supervisor.systemMetrics.MemoryUsedPercent,
+		DiskTotalBytes:       supervisor.systemMetrics.DiskTotalBytes,
+		DiskFreeBytes:        supervisor.systemMetrics.DiskFreeBytes,
+		DiskUsedBytes:        supervisor.systemMetrics.DiskUsedBytes,
+		DiskUsedPercent:      supervisor.systemMetrics.DiskUsedPercent,
+		SystemUptimeSeconds:  supervisor.systemMetrics.SystemUptimeSeconds,
+		ZRAMEnabled:          supervisor.systemMetrics.ZRAMEnabled,
+		ZRAMDeviceCount:      supervisor.systemMetrics.ZRAMDeviceCount,
+		ZRAMTotalBytes:       supervisor.systemMetrics.ZRAMTotalBytes,
+		ZRAMUsedBytes:        supervisor.systemMetrics.ZRAMUsedBytes,
 	}
 }
 
@@ -1186,12 +1260,212 @@ func buildInboundTag(inbound InboundPayload) string {
 	return "inbound-" + strconv.Itoa(inbound.ID) + "-" + inbound.Protocol
 }
 
+type jsonCodec struct{}
+
+func (jsonCodec) Marshal(value any) ([]byte, error) {
+	return json.Marshal(value)
+}
+
+func (jsonCodec) Unmarshal(data []byte, value any) error {
+	if len(data) == 0 {
+		data = []byte("{}")
+	}
+	return json.Unmarshal(data, value)
+}
+
+func (jsonCodec) Name() string {
+	return "json"
+}
+
+type BridgeServiceServer interface {
+	GetRuntimeStatus(context.Context, *Empty) (*RuntimeStatusResponse, error)
+	GetRuntimeConfig(context.Context, *Empty) (*RuntimeConfigResponse, error)
+	ListClientStats(context.Context, *ListClientStatsRequest) (*ClientStatsListResponse, error)
+	ApplyInbound(context.Context, *InboundApplyRequest) (*InboundApplyResponse, error)
+	RemoveInbound(context.Context, *InboundRemoveRequest) (*InboundRemoveResponse, error)
+	RemoveClient(context.Context, *ClientRemoveRequest) (*ClientRemoveResponse, error)
+}
+
+type bridgeGRPCServer struct {
+	configuration ApplicationConfiguration
+	bridgeState   *BridgeState
+	supervisor    *XraySupervisor
+}
+
+func (server *bridgeGRPCServer) GetRuntimeStatus(_ context.Context, _ *Empty) (*RuntimeStatusResponse, error) {
+	statusResponse := server.supervisor.Status()
+	return &statusResponse, nil
+}
+
+func (server *bridgeGRPCServer) GetRuntimeConfig(_ context.Context, _ *Empty) (*RuntimeConfigResponse, error) {
+	xrayConfiguration, errorValue := BuildXrayConfiguration(
+		server.bridgeState.SnapshotInbounds(),
+		server.configuration.XrayAPIPort,
+	)
+	if errorValue != nil {
+		return nil, status.Error(codes.InvalidArgument, errorValue.Error())
+	}
+
+	return &RuntimeConfigResponse{Config: xrayConfiguration}, nil
+}
+
+func (server *bridgeGRPCServer) ListClientStats(_ context.Context, request *ListClientStatsRequest) (*ClientStatsListResponse, error) {
+	return &ClientStatsListResponse{Clients: server.supervisor.ReadClientStats(request.UUIDs)}, nil
+}
+
+func (server *bridgeGRPCServer) ApplyInbound(_ context.Context, request *InboundApplyRequest) (*InboundApplyResponse, error) {
+	server.bridgeState.UpsertInbound(request.Inbound)
+	if errorValue := server.supervisor.Restart(); errorValue != nil {
+		return nil, status.Error(codes.Internal, errorValue.Error())
+	}
+
+	return &InboundApplyResponse{
+		Status:        "applied",
+		InboundID:     request.Inbound.ID,
+		ActiveClients: server.bridgeState.CountActiveClients(),
+		Configuration: server.configuration.XrayConfigurationPath,
+	}, nil
+}
+
+func (server *bridgeGRPCServer) RemoveInbound(_ context.Context, request *InboundRemoveRequest) (*InboundRemoveResponse, error) {
+	server.bridgeState.RemoveInbound(request.InboundID)
+	if errorValue := server.supervisor.Restart(); errorValue != nil {
+		return nil, status.Error(codes.Internal, errorValue.Error())
+	}
+
+	return &InboundRemoveResponse{
+		Status:    "removed",
+		InboundID: request.InboundID,
+	}, nil
+}
+
+func (server *bridgeGRPCServer) RemoveClient(_ context.Context, request *ClientRemoveRequest) (*ClientRemoveResponse, error) {
+	server.bridgeState.RemoveClient(request.UUID)
+	if errorValue := server.supervisor.Restart(); errorValue != nil {
+		return nil, status.Error(codes.Internal, errorValue.Error())
+	}
+
+	return &ClientRemoveResponse{
+		Status: "removed",
+		UUID:   request.UUID,
+	}, nil
+}
+
+func registerBridgeServiceServer(grpcServer *grpc.Server, implementation BridgeServiceServer) {
+	grpcServer.RegisterService(&grpc.ServiceDesc{
+		ServiceName: "progenui.bridge.BridgeService",
+		HandlerType: (*BridgeServiceServer)(nil),
+		Methods: []grpc.MethodDesc{
+			{MethodName: "GetRuntimeStatus", Handler: getRuntimeStatusHandler},
+			{MethodName: "GetRuntimeConfig", Handler: getRuntimeConfigHandler},
+			{MethodName: "ListClientStats", Handler: listClientStatsHandler},
+			{MethodName: "ApplyInbound", Handler: applyInboundHandler},
+			{MethodName: "RemoveInbound", Handler: removeInboundHandler},
+			{MethodName: "RemoveClient", Handler: removeClientHandler},
+		},
+		Streams:  []grpc.StreamDesc{},
+		Metadata: "proto/bridge.proto",
+	}, implementation)
+}
+
+func getRuntimeStatusHandler(service any, contextValue context.Context, decoder func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	request := &Empty{}
+	if errorValue := decoder(request); errorValue != nil {
+		return nil, errorValue
+	}
+	if interceptor == nil {
+		return service.(BridgeServiceServer).GetRuntimeStatus(contextValue, request)
+	}
+	info := &grpc.UnaryServerInfo{Server: service, FullMethod: "/progenui.bridge.BridgeService/GetRuntimeStatus"}
+	handler := func(contextValue context.Context, requestValue any) (any, error) {
+		return service.(BridgeServiceServer).GetRuntimeStatus(contextValue, requestValue.(*Empty))
+	}
+	return interceptor(contextValue, request, info, handler)
+}
+
+func getRuntimeConfigHandler(service any, contextValue context.Context, decoder func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	request := &Empty{}
+	if errorValue := decoder(request); errorValue != nil {
+		return nil, errorValue
+	}
+	if interceptor == nil {
+		return service.(BridgeServiceServer).GetRuntimeConfig(contextValue, request)
+	}
+	info := &grpc.UnaryServerInfo{Server: service, FullMethod: "/progenui.bridge.BridgeService/GetRuntimeConfig"}
+	handler := func(contextValue context.Context, requestValue any) (any, error) {
+		return service.(BridgeServiceServer).GetRuntimeConfig(contextValue, requestValue.(*Empty))
+	}
+	return interceptor(contextValue, request, info, handler)
+}
+
+func listClientStatsHandler(service any, contextValue context.Context, decoder func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	request := &ListClientStatsRequest{}
+	if errorValue := decoder(request); errorValue != nil {
+		return nil, errorValue
+	}
+	if interceptor == nil {
+		return service.(BridgeServiceServer).ListClientStats(contextValue, request)
+	}
+	info := &grpc.UnaryServerInfo{Server: service, FullMethod: "/progenui.bridge.BridgeService/ListClientStats"}
+	handler := func(contextValue context.Context, requestValue any) (any, error) {
+		return service.(BridgeServiceServer).ListClientStats(contextValue, requestValue.(*ListClientStatsRequest))
+	}
+	return interceptor(contextValue, request, info, handler)
+}
+
+func applyInboundHandler(service any, contextValue context.Context, decoder func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	request := &InboundApplyRequest{}
+	if errorValue := decoder(request); errorValue != nil {
+		return nil, errorValue
+	}
+	if interceptor == nil {
+		return service.(BridgeServiceServer).ApplyInbound(contextValue, request)
+	}
+	info := &grpc.UnaryServerInfo{Server: service, FullMethod: "/progenui.bridge.BridgeService/ApplyInbound"}
+	handler := func(contextValue context.Context, requestValue any) (any, error) {
+		return service.(BridgeServiceServer).ApplyInbound(contextValue, requestValue.(*InboundApplyRequest))
+	}
+	return interceptor(contextValue, request, info, handler)
+}
+
+func removeInboundHandler(service any, contextValue context.Context, decoder func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	request := &InboundRemoveRequest{}
+	if errorValue := decoder(request); errorValue != nil {
+		return nil, errorValue
+	}
+	if interceptor == nil {
+		return service.(BridgeServiceServer).RemoveInbound(contextValue, request)
+	}
+	info := &grpc.UnaryServerInfo{Server: service, FullMethod: "/progenui.bridge.BridgeService/RemoveInbound"}
+	handler := func(contextValue context.Context, requestValue any) (any, error) {
+		return service.(BridgeServiceServer).RemoveInbound(contextValue, requestValue.(*InboundRemoveRequest))
+	}
+	return interceptor(contextValue, request, info, handler)
+}
+
+func removeClientHandler(service any, contextValue context.Context, decoder func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	request := &ClientRemoveRequest{}
+	if errorValue := decoder(request); errorValue != nil {
+		return nil, errorValue
+	}
+	if interceptor == nil {
+		return service.(BridgeServiceServer).RemoveClient(contextValue, request)
+	}
+	info := &grpc.UnaryServerInfo{Server: service, FullMethod: "/progenui.bridge.BridgeService/RemoveClient"}
+	handler := func(contextValue context.Context, requestValue any) (any, error) {
+		return service.(BridgeServiceServer).RemoveClient(contextValue, requestValue.(*ClientRemoveRequest))
+	}
+	return interceptor(contextValue, request, info, handler)
+}
+
 func main() {
 	gin.SetMode(gin.ReleaseMode)
+	encoding.RegisterCodec(jsonCodec{})
 
 	apiPort, _ := strconv.Atoi(getEnvironmentValue("XRAY_API_PORT", "10085"))
 	configuration := ApplicationConfiguration{
 		Port:                  getEnvironmentValue("PORT", "8081"),
+		GRPCPort:              getEnvironmentValue("GRPC_PORT", "50051"),
 		XrayBinaryPath:        getEnvironmentValue("XRAY_BINARY", "/usr/local/bin/xray"),
 		XrayConfigurationPath: getEnvironmentValue("XRAY_CONFIG_PATH", "/etc/xray/config.json"),
 		XrayAPIPort:           apiPort,
@@ -1200,6 +1474,23 @@ func main() {
 	bridgeState := NewBridgeState()
 	supervisor := NewXraySupervisor(configuration, bridgeState)
 	supervisor.Start()
+	grpcServer := grpc.NewServer(grpc.ForceServerCodec(jsonCodec{}))
+	registerBridgeServiceServer(grpcServer, &bridgeGRPCServer{
+		configuration: configuration,
+		bridgeState:   bridgeState,
+		supervisor:    supervisor,
+	})
+
+	go func() {
+		listener, errorValue := net.Listen("tcp", ":"+configuration.GRPCPort)
+		if errorValue != nil {
+			log.Fatalf("failed to listen on gRPC port %s: %v", configuration.GRPCPort, errorValue)
+		}
+		log.Printf("bridge gRPC listening on :%s", configuration.GRPCPort)
+		if errorValue := grpcServer.Serve(listener); errorValue != nil {
+			log.Fatalf("failed to serve gRPC bridge: %v", errorValue)
+		}
+	}()
 
 	router := gin.Default()
 	router.GET("/health", func(context *gin.Context) {
