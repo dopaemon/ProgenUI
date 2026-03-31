@@ -15,6 +15,12 @@ Monorepo scaffold for an X-UI-inspired control panel built with React, FastAPI, 
 docker compose up --build
 ```
 
+If Docker is missing on a Debian or Ubuntu Linux host, you can inspect or install it with:
+
+```bash
+python3 scripts/docker_env.py
+```
+
 Default admin credentials:
 
 - Username: `admin`
