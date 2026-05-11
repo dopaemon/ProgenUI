@@ -8,4 +8,4 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.27
 grpcio==1.74.0
-pytest==8.4.2
+pytest==9.0.3
