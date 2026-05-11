@@ -27,6 +27,8 @@ import { formatDateTime } from "utils/formatters";
 const supportedProtocolOptions = [
   { value: "vless", label: "VLESS" },
   { value: "trojan", label: "Trojan" },
+  { value: "vmess", label: "VMess" },
+  { value: "http", label: "HTTP" },
 ];
 
 const supportedTransportOptions = [

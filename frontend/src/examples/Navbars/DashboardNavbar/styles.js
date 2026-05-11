@@ -36,7 +36,7 @@ function navbar(theme, ownerState) {
             gradients.navbar.main,
             gradients.navbar.state,
             gradients.navbar.deg
-          )} !importants`,
+          )} !important`,
 
     color: () => {
       let color;

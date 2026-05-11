@@ -3,6 +3,7 @@ import Card from "@mui/material/Card";
 import Grid from "@mui/material/Grid";
 import LinearProgress from "@mui/material/LinearProgress";
 import Stack from "@mui/material/Stack";
+import Icon from "@mui/material/Icon";
 
 import DashboardLayout from "examples/LayoutContainers/DashboardLayout";
 import DashboardNavbar from "examples/Navbars/DashboardNavbar";
@@ -11,6 +12,7 @@ import MiniStatisticsCard from "examples/Cards/StatisticsCards/MiniStatisticsCar
 import LineChart from "examples/Charts/LineCharts/LineChart";
 import VuiAlert from "components/VuiAlert";
 import VuiBox from "components/VuiBox";
+import VuiButton from "components/VuiButton";
 import VuiTypography from "components/VuiTypography";
 import { IoBuild, IoCloudOffline, IoPeople, IoPulse } from "react-icons/io5";
 
@@ -115,11 +117,18 @@ function Dashboard() {
   const [systemHealth, setSystemHealth] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
 
-    async function loadDashboardData() {
+    async function loadDashboardData({ showLoader = false } = {}) {
+      if (showLoader) {
+        setIsRefreshing(true);
+      }
+
       try {
         const [summaryResponse, historyResponse, healthResponse] = await Promise.all([
           getDashboardSummary(),
@@ -135,6 +144,7 @@ function Dashboard() {
         setTrafficHistory(historyResponse);
         setSystemHealth(healthResponse);
         setErrorMessage("");
+        setLastUpdatedAt(new Date());
       } catch (error) {
         if (isMounted) {
           setErrorMessage(error.message || "Unable to load dashboard.");
@@ -142,11 +152,12 @@ function Dashboard() {
       } finally {
         if (isMounted) {
           setIsLoading(false);
+          setIsRefreshing(false);
         }
       }
     }
 
-    loadDashboardData();
+    loadDashboardData({ showLoader: true });
     const refreshInterval = window.setInterval(() => {
       loadDashboardData();
     }, 30000);
@@ -161,6 +172,7 @@ function Dashboard() {
       if (dashboardEvent.type === "dashboard") {
         setDashboardSummary(dashboardEvent.summary);
         setTrafficHistory(dashboardEvent.traffic);
+        setLastUpdatedAt(new Date());
       }
     };
 
@@ -169,7 +181,7 @@ function Dashboard() {
       window.clearInterval(refreshInterval);
       websocketConnection.close();
     };
-  }, []);
+  }, [refreshNonce]);
 
   const hasTrafficSamples = trafficHistory.length > 0;
   const lineChartSeries = useMemo(
@@ -284,6 +296,42 @@ function Dashboard() {
     [systemHealth]
   );
 
+  const nodeHealthItems = useMemo(
+    () => [
+      { label: "Xray process", value: systemHealth?.xray_running ? "Running" : "Stopped" },
+      { label: "Runtime mode", value: systemHealth?.runtime_mode || "unknown" },
+      { label: "Xray binary", value: systemHealth?.binary_detected ? "Detected" : "Missing" },
+      { label: "Xray API", value: systemHealth?.xray_api_reachable ? "Reachable" : "Unavailable" },
+      { label: "API port", value: systemHealth?.api_port || "Unknown" },
+      { label: "Runtime inbounds", value: systemHealth?.inbound_count || 0 },
+      { label: "Runtime active clients", value: systemHealth?.active_client_count || 0 },
+      { label: "Xray version", value: systemHealth?.xray_version || "Unavailable", isCaption: true },
+      { label: "Binary path", value: systemHealth?.binary_path || "Unavailable", isCaption: true },
+      {
+        label: "Last traffic sample",
+        value: trafficHistory.length
+          ? formatDateTime(trafficHistory[trafficHistory.length - 1].timestamp)
+          : "No samples yet",
+        isCaption: true,
+      },
+      {
+        label: "Last health check",
+        value: systemHealth?.last_health_check_at
+          ? formatDateTime(systemHealth.last_health_check_at)
+          : "No check yet",
+        isCaption: true,
+      },
+      {
+        label: "Last stats sync",
+        value: systemHealth?.last_stats_sync_at
+          ? formatDateTime(systemHealth.last_stats_sync_at)
+          : "No sync yet",
+        isCaption: true,
+      },
+    ],
+    [systemHealth, trafficHistory]
+  );
+
   return (
     <DashboardLayout>
       <DashboardNavbar />
@@ -295,6 +343,30 @@ function Dashboard() {
           <VuiTypography variant="button" color="text">
             Live traffic, node health, and control plane overview.
           </VuiTypography>
+          <VuiBox mt={1.5} display="flex" alignItems="center" gap={1.25} flexWrap="wrap">
+            <VuiTypography variant="caption" color="text">
+              Last updated: {lastUpdatedAt ? formatDateTime(lastUpdatedAt) : "Waiting for first sync"}
+            </VuiTypography>
+            <VuiButton
+              variant="outlined"
+              color="info"
+              size="small"
+              onClick={() => {
+                if (!isRefreshing) {
+                  setIsLoading(true);
+                  setRefreshNonce((currentNonce) => currentNonce + 1);
+                }
+              }}
+              disabled={isRefreshing}
+            >
+              <VuiBox display="flex" alignItems="center" gap={0.5}>
+                <Icon fontSize="small">{isRefreshing ? "autorenew" : "refresh"}</Icon>
+                <VuiTypography variant="caption" color="white" fontWeight="medium">
+                  {isRefreshing ? "Refreshing..." : "Refresh"}
+                </VuiTypography>
+              </VuiBox>
+            </VuiButton>
+          </VuiBox>
           {errorMessage ? (
             <VuiBox mt={2}>
               <VuiAlert color="error">{errorMessage}</VuiAlert>
@@ -381,46 +453,6 @@ function Dashboard() {
                   <Stack spacing={2} mt={3}>
                     <Card sx={{ p: 2 }}>
                       <VuiTypography variant="button" color="text">
-                        Xray process
-                      </VuiTypography>
-                      <VuiTypography variant="h5" color="white" fontWeight="bold">
-                        {systemHealth?.xray_running ? "Running" : "Stopped"}
-                      </VuiTypography>
-                    </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
-                        Runtime mode
-                      </VuiTypography>
-                      <VuiTypography variant="h5" color="white" fontWeight="bold">
-                        {systemHealth?.runtime_mode || "unknown"}
-                      </VuiTypography>
-                    </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
-                        Xray binary
-                      </VuiTypography>
-                      <VuiTypography variant="h5" color="white" fontWeight="bold">
-                        {systemHealth?.binary_detected ? "Detected" : "Missing"}
-                      </VuiTypography>
-                    </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
-                        Xray API
-                      </VuiTypography>
-                      <VuiTypography variant="h5" color="white" fontWeight="bold">
-                        {systemHealth?.xray_api_reachable ? "Reachable" : "Unavailable"}
-                      </VuiTypography>
-                    </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
-                        API port
-                      </VuiTypography>
-                      <VuiTypography variant="h5" color="white" fontWeight="bold">
-                        {systemHealth?.api_port || "Unknown"}
-                      </VuiTypography>
-                    </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
                         Stats source
                       </VuiTypography>
                       <VuiBox
@@ -446,68 +478,24 @@ function Dashboard() {
                         {statsSourceSummary.detail}
                       </VuiTypography>
                     </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
-                        Runtime inbounds
-                      </VuiTypography>
-                      <VuiTypography variant="h5" color="white" fontWeight="bold">
-                        {systemHealth?.inbound_count || 0}
-                      </VuiTypography>
-                    </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
-                        Runtime active clients
-                      </VuiTypography>
-                      <VuiTypography variant="h5" color="white" fontWeight="bold">
-                        {systemHealth?.active_client_count || 0}
-                      </VuiTypography>
-                    </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
-                        Xray version
-                      </VuiTypography>
-                      <VuiTypography variant="caption" color="white" fontWeight="regular">
-                        {systemHealth?.xray_version || "Unavailable"}
-                      </VuiTypography>
-                    </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
-                        Binary path
-                      </VuiTypography>
-                      <VuiTypography variant="caption" color="white" fontWeight="regular">
-                        {systemHealth?.binary_path || "Unavailable"}
-                      </VuiTypography>
-                    </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
-                        Last traffic sample
-                      </VuiTypography>
-                      <VuiTypography variant="caption" color="white" fontWeight="regular">
-                        {trafficHistory.length
-                          ? formatDateTime(trafficHistory[trafficHistory.length - 1].timestamp)
-                          : "No samples yet"}
-                      </VuiTypography>
-                    </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
-                        Last health check
-                      </VuiTypography>
-                      <VuiTypography variant="caption" color="white" fontWeight="regular">
-                        {systemHealth?.last_health_check_at
-                          ? formatDateTime(systemHealth.last_health_check_at)
-                          : "No check yet"}
-                      </VuiTypography>
-                    </Card>
-                    <Card sx={{ p: 2 }}>
-                      <VuiTypography variant="button" color="text">
-                        Last stats sync
-                      </VuiTypography>
-                      <VuiTypography variant="caption" color="white" fontWeight="regular">
-                        {systemHealth?.last_stats_sync_at
-                          ? formatDateTime(systemHealth.last_stats_sync_at)
-                          : "No sync yet"}
-                      </VuiTypography>
-                    </Card>
+                    <Grid container spacing={2}>
+                      {nodeHealthItems.map((item) => (
+                        <Grid item xs={12} md={6} key={item.label}>
+                          <Card sx={{ p: 2, height: "100%" }}>
+                            <VuiTypography variant="button" color="text">
+                              {item.label}
+                            </VuiTypography>
+                            <VuiTypography
+                              variant={item.isCaption ? "caption" : "h5"}
+                              color="white"
+                              fontWeight={item.isCaption ? "regular" : "bold"}
+                            >
+                              {item.value}
+                            </VuiTypography>
+                          </Card>
+                        </Grid>
+                      ))}
+                    </Grid>
                     {systemHealth?.last_stats_error ? (
                       <Card sx={{ p: 2 }}>
                         <VuiTypography variant="button" color="text">

@@ -372,3 +372,39 @@ def test_sync_all_inbounds_to_bridge_rehydrates_runtime(
             ],
         }
     ]
+
+
+def test_create_inbound_accepts_vmess_and_http_protocols(database_session: Session, admin_user: Admin) -> None:
+    vmess_inbound = run_async(
+        create_inbound(
+            InboundCreate(
+                name="vmess-one",
+                protocol="vmess",
+                listen_port=12443,
+                transport="ws",
+                security="tls",
+                settings_json='{"wsSettings":{"path":"/vmess"}}',
+                enabled=True,
+            ),
+            admin_user,
+            database_session,
+        )
+    )
+    http_inbound = run_async(
+        create_inbound(
+            InboundCreate(
+                name="http-one",
+                protocol="http",
+                listen_port=12444,
+                transport="tcp",
+                security="none",
+                settings_json="{}",
+                enabled=True,
+            ),
+            admin_user,
+            database_session,
+        )
+    )
+
+    assert vmess_inbound.protocol == "vmess"
+    assert http_inbound.protocol == "http"

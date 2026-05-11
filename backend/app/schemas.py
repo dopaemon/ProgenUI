@@ -33,8 +33,8 @@ class InboundBase(BaseModel):
     @classmethod
     def validate_protocol(cls, value: str) -> str:
         normalized_value = value.strip().lower()
-        if normalized_value not in {"vless", "trojan"}:
-            raise ValueError("Protocol must be either 'vless' or 'trojan'")
+        if normalized_value not in {"vless", "trojan", "vmess", "http"}:
+            raise ValueError("Protocol must be one of: 'vless', 'trojan', 'vmess', 'http'")
         return normalized_value
 
     @field_validator("transport")

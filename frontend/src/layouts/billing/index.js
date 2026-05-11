@@ -488,7 +488,7 @@ function createConfigurationLink(client, inbound) {
   }
 
   const hostname = window.location.hostname || "localhost";
-  const protocol = inbound.protocol.toLowerCase() === "trojan" ? "trojan" : "vless";
+  const protocol = (inbound.protocol || "").toLowerCase();
   const inboundSettings = readInboundSettings(inbound);
   const websocketPath = inboundSettings.wsSettings?.path || "/";
   const websocketHost = inboundSettings.wsSettings?.headers?.Host || "";
@@ -498,6 +498,29 @@ function createConfigurationLink(client, inbound) {
     return `trojan://${client.uuid}@${hostname}:${inbound.listen_port}#${encodeURIComponent(
       client.email
     )}`;
+  }
+
+  if (protocol === "vmess") {
+    const vmessPayload = {
+      v: "2",
+      ps: client.email,
+      add: hostname,
+      port: String(inbound.listen_port),
+      id: client.uuid,
+      aid: "0",
+      scy: "auto",
+      net: inbound.transport || "tcp",
+      type: "none",
+      host: websocketHost,
+      path: inbound.transport === "ws" ? websocketPath : "",
+      tls: inbound.security === "tls" ? "tls" : "",
+      sni: tlsServerName,
+    };
+    return `vmess://${window.btoa(JSON.stringify(vmessPayload))}`;
+  }
+
+  if (protocol === "http") {
+    return "";
   }
 
   const searchParameters = new URLSearchParams({

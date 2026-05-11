@@ -33,7 +33,6 @@ import Icon from "@mui/material/Icon";
 // Vision UI Dashboard React components
 import VuiBox from "components/VuiBox";
 import VuiTypography from "components/VuiTypography";
-import VuiInput from "components/VuiInput";
 
 // Vision UI Dashboard React example components
 import Breadcrumbs from "examples/Breadcrumbs";
@@ -102,26 +101,12 @@ function DashboardNavbar({ absolute, light, isMini }) {
         </VuiBox>
         {isMini ? null : (
           <VuiBox sx={(theme) => navbarRow(theme, { isMini })}>
-            <VuiBox pr={1}>
-              <VuiInput
-                placeholder="Type here..."
-                icon={{ component: "search", direction: "left" }}
-                sx={({ breakpoints }) => ({
-                  [breakpoints.down("sm")]: {
-                    maxWidth: "80px",
-                  },
-                  [breakpoints.only("sm")]: {
-                    maxWidth: "80px",
-                  },
-                  backgroundColor: "info.main !important",
-                })}
-              />
-            </VuiBox>
             <VuiBox color={light ? "white" : "inherit"}>
               <Link to="/authentication/sign-in">
                 <IconButton
                   sx={navbarIconButton}
                   size="small"
+                  aria-label={isAuthenticated ? "Sign out" : "Sign in"}
                   onClick={() => {
                     if (isAuthenticated) {
                       signOut();
@@ -148,6 +133,7 @@ function DashboardNavbar({ absolute, light, isMini }) {
                 size="small"
                 color="inherit"
                 sx={navbarMobileMenu}
+                aria-label={miniSidenav ? "Expand menu" : "Collapse menu"}
                 onClick={handleMiniSidenav}
               >
                 <Icon className={"text-white"}>{miniSidenav ? "menu_open" : "menu"}</Icon>
