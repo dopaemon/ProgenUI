@@ -323,6 +323,7 @@ function buildInboundFormFromApiResponse(inbound) {
 
 function Tables() {
   const [inboundList, setInboundList] = useState([]);
+  const [searchKeyword, setSearchKeyword] = useState("");
   const [inboundForm, setInboundForm] = useState(buildDefaultInboundForm());
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -346,6 +347,24 @@ function Tables() {
   }, []);
 
   const isEditingInbound = useMemo(() => Boolean(inboundForm.id), [inboundForm.id]);
+  const filteredInboundList = useMemo(() => {
+    const normalizedKeyword = searchKeyword.trim().toLowerCase();
+    if (!normalizedKeyword) {
+      return inboundList;
+    }
+
+    return inboundList.filter((inbound) => {
+      const searchableText = [
+        inbound.name,
+        inbound.protocol,
+        String(inbound.listen_port),
+        inbound.enabled ? "enabled active bật" : "disabled inactive tắt",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return searchableText.includes(normalizedKeyword);
+    });
+  }, [inboundList, searchKeyword]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -575,6 +594,13 @@ function Tables() {
               <VuiTypography variant="lg" color="white" fontWeight="bold" mb={2}>
                 Inbound Inventory
               </VuiTypography>
+              <VuiBox mb={2}>
+                <VuiInput
+                  value={searchKeyword}
+                  onChange={(event) => setSearchKeyword(event.target.value)}
+                  placeholder="Tìm inbound theo name, protocol, port, status..."
+                />
+              </VuiBox>
               {isLoading ? <LinearProgress sx={{ mb: 2 }} /> : null}
               <InventoryHeader />
               {!inboundList.length ? (
@@ -592,7 +618,22 @@ function Tables() {
                   </VuiTypography>
                 </VuiBox>
               ) : null}
-              {inboundList.map((inbound) => (
+              {inboundList.length > 0 && !filteredInboundList.length ? (
+                <VuiBox
+                  sx={{
+                    mt: 1.5,
+                    p: 3,
+                    borderRadius: "20px",
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  <VuiTypography variant="button" color="text">
+                    Không có inbound khớp từ khóa.
+                  </VuiTypography>
+                </VuiBox>
+              ) : null}
+              {filteredInboundList.map((inbound) => (
                 <InventoryRow
                   key={inbound.id}
                   inbound={inbound}

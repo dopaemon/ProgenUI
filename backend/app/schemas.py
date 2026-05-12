@@ -20,6 +20,28 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class AccountProfile(BaseModel):
+    username: str
+
+
+class ChangeUsernameRequest(BaseModel):
+    current_password: str
+    new_username: str = Field(min_length=3, max_length=64)
+
+    @field_validator("new_username")
+    @classmethod
+    def normalize_new_username(cls, value: str) -> str:
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("Username cannot be empty")
+        return normalized_value
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class InboundBase(BaseModel):
     name: str
     protocol: str

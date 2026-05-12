@@ -555,6 +555,7 @@ function buildShareState(client, inbound) {
 function Billing() {
   const [clientList, setClientList] = useState([]);
   const [inboundList, setInboundList] = useState([]);
+  const [searchKeyword, setSearchKeyword] = useState("");
   const [clientForm, setClientForm] = useState(buildDefaultClientForm());
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -589,6 +590,26 @@ function Billing() {
     () => Object.fromEntries(inboundList.map((inbound) => [inbound.id, inbound.name])),
     [inboundList]
   );
+  const filteredClientList = useMemo(() => {
+    const normalizedKeyword = searchKeyword.trim().toLowerCase();
+    if (!normalizedKeyword) {
+      return clientList;
+    }
+
+    return clientList.filter((client) => {
+      const inboundName = inboundNameById[client.inbound_id] || String(client.inbound_id);
+      const searchableText = [
+        client.email,
+        client.uuid,
+        inboundName,
+        client.enabled ? "enabled active bật" : "disabled inactive tắt",
+        client.expiry_at ? new Date(client.expiry_at).toISOString() : "never no expiry",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return searchableText.includes(normalizedKeyword);
+    });
+  }, [clientList, inboundNameById, searchKeyword]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -832,6 +853,13 @@ function Billing() {
               <VuiTypography variant="lg" color="white" fontWeight="bold" mb={2}>
                 Client Inventory
               </VuiTypography>
+              <VuiBox mb={2}>
+                <VuiInput
+                  value={searchKeyword}
+                  onChange={(event) => setSearchKeyword(event.target.value)}
+                  placeholder="Tìm client theo email, uuid, inbound, status..."
+                />
+              </VuiBox>
               {isLoading ? <LinearProgress sx={{ mb: 2 }} /> : null}
               <ClientInventoryHeader />
               {!clientList.length ? (
@@ -849,7 +877,22 @@ function Billing() {
                   </VuiTypography>
                 </VuiBox>
               ) : null}
-              {clientList.map((client) => {
+              {clientList.length > 0 && !filteredClientList.length ? (
+                <VuiBox
+                  sx={{
+                    mt: 1.5,
+                    p: 3,
+                    borderRadius: "20px",
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  <VuiTypography variant="button" color="text">
+                    Không có client khớp từ khóa.
+                  </VuiTypography>
+                </VuiBox>
+              ) : null}
+              {filteredClientList.map((client) => {
                 const inbound = inboundList.find(
                   (currentInbound) => currentInbound.id === client.inbound_id
                 );

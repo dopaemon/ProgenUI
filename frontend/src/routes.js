@@ -42,10 +42,12 @@
 import Dashboard from "layouts/dashboard";
 import Inbounds from "layouts/tables";
 import Clients from "layouts/billing";
+import Settings from "layouts/settings";
 // Vision UI Dashboard React icons
 import { IoStatsChart } from "react-icons/io5";
 import { IoHome } from "react-icons/io5";
 import { IoPeople } from "react-icons/io5";
+import { IoSettings } from "react-icons/io5";
 
 const routes = [
   {
@@ -74,7 +76,16 @@ const routes = [
     icon: <IoPeople size="15px" color="inherit" />,
     component: Clients,
     noCollapse: true,
-  }
+  },
+  {
+    type: "collapse",
+    name: "Cài đặt",
+    key: "settings",
+    route: "/settings",
+    icon: <IoSettings size="15px" color="inherit" />,
+    component: Settings,
+    noCollapse: true,
+  },
 ];
 
 export default routes;

@@ -146,6 +146,37 @@ function getSystemConfig() {
   return sendAuthenticatedRequest("/system/config");
 }
 
+function getAccountProfile() {
+  return sendAuthenticatedRequest("/auth/account");
+}
+
+async function changeUsername(currentPassword, newUsername) {
+  const response = await sendAuthenticatedRequest("/auth/change-username", {
+    method: "POST",
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_username: newUsername,
+    }),
+  });
+
+  const nextAuthenticationState = {
+    accessToken: response.access_token,
+    refreshToken: response.refresh_token,
+  };
+  writeStoredAuthentication(nextAuthenticationState);
+  return nextAuthenticationState;
+}
+
+function changePassword(currentPassword, newPassword) {
+  return sendAuthenticatedRequest("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+}
+
 function listInbounds() {
   return sendAuthenticatedRequest("/inbounds");
 }
@@ -196,11 +227,14 @@ function deleteClient(clientId) {
 
 export {
   clearStoredAuthentication,
+  changePassword,
+  changeUsername,
   createAuthenticatedSession,
   createClient,
   createInbound,
   deleteClient,
   deleteInbound,
+  getAccountProfile,
   getDashboardSummary,
   getSystemConfig,
   getSystemHealth,

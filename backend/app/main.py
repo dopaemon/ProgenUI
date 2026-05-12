@@ -16,8 +16,11 @@ from .database import Base, SessionLocal, engine, get_db
 from .deps import get_current_admin
 from .models import Admin, Client, Inbound
 from .schemas import (
+    AccountProfile,
     BridgeRuntimeConfig,
     BridgeRuntimeStatus,
+    ChangePasswordRequest,
+    ChangeUsernameRequest,
     ClientCreate,
     ClientRead,
     ClientUpdate,
@@ -265,6 +268,49 @@ async def refresh_token(payload: RefreshRequest, database_session: Session = Dep
 @app.post("/api/auth/logout")
 async def logout(_: Admin = Depends(get_current_admin)) -> dict:
     return {"status": "ok"}
+
+
+@app.get("/api/auth/account", response_model=AccountProfile)
+async def get_account(current_admin: Admin = Depends(get_current_admin)) -> AccountProfile:
+    return AccountProfile(username=current_admin.username)
+
+
+@app.post("/api/auth/change-username", response_model=TokenPair)
+async def change_username(
+    payload: ChangeUsernameRequest,
+    current_admin: Admin = Depends(get_current_admin),
+    database_session: Session = Depends(get_db),
+) -> TokenPair:
+    if not verify_password(payload.current_password, current_admin.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    normalized_new_username = payload.new_username.strip()
+    existing_admin = database_session.query(Admin).filter(Admin.username == normalized_new_username).first()
+    if existing_admin and existing_admin.id != current_admin.id:
+        raise HTTPException(status_code=409, detail="Username already exists")
+
+    current_admin.username = normalized_new_username
+    save_database_changes(database_session)
+    database_session.refresh(current_admin)
+
+    return TokenPair(
+        access_token=create_token(current_admin.username, settings.jwt_access_minutes, "access"),
+        refresh_token=create_token(current_admin.username, settings.jwt_refresh_minutes, "refresh"),
+    )
+
+
+@app.post("/api/auth/change-password")
+async def change_password(
+    payload: ChangePasswordRequest,
+    current_admin: Admin = Depends(get_current_admin),
+    database_session: Session = Depends(get_db),
+) -> dict:
+    if not verify_password(payload.current_password, current_admin.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    current_admin.password_hash = hash_password(payload.new_password)
+    save_database_changes(database_session)
+    return {"status": "updated"}
 
 
 @app.get("/api/dashboard/summary", response_model=DashboardSummary)

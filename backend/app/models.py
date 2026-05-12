@@ -68,4 +68,3 @@ class SystemSetting(Base):
 
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
     value: Mapped[str] = mapped_column(String)
-
